@@ -777,49 +777,15 @@ class UniVTACBulbTighteningCodeEnv(CodeExecutionEnvBase):
 class UniVTACBulbTighteningPerceptionCodeEnv(UniVTACBulbTighteningCodeEnv):
     """The bulb on the perception line (``UniVTACPerceptionApi``).
 
-    Same task and the same tactile routine; one skill is withheld.
-    ``bulb-grasp-pose`` tells the run to ask ``sample_grasp_pose`` for the
-    bulb's grasp pose after every re-grasp, and that recipe is the server's
-    ground-truth branch (``_GT_GRASP_RULES``, ``launch_univtac_server.py``).
-    The perception API class turns that branch off (``_ground_truth_grasp =
-    False``), so on this line the same call hands back the hand's own parked
-    pose instead of the bulb's -- the 2026-10-05 failure, where the grasp
-    landed 63 mm off the bulb and closing on air ended the episode.  The
-    config that uses this class carries the perception-side grasp recipe in
-    its own ``prompt:`` block instead.
-
-    The tuple is the library's bulb routing minus that one skill.  It is
-    written out rather than derived so the delivered set can be read off the
-    class; `test_the_only_hook_override_is_the_perception_bulb_variant`
-    fails if the two sets ever drift apart.
+    Same task and the same resident tactile text; what changes is the grasp
+    pose.  The privileged line asks ``sample_grasp_pose`` for the bulb's
+    pose, and that answer is the server's ground-truth branch
+    (``_GT_GRASP_RULES``, ``launch_univtac_server.py``).  The perception API
+    class turns that branch off (``_ground_truth_grasp = False``), so here
+    the same call hands back the hand's own parked pose instead of the
+    bulb's -- the 2026-10-05 failure, where the grasp landed 63 mm off the
+    bulb and closing on air ended the episode.  The config that uses this
+    class carries the perception-side grasp recipe in its own ``prompt:``
+    block instead, which is where a non-tactile recipe belongs: nothing
+    about it is read off the gel.
     """
-
-    tactile_skills = (
-        # act -- everything routed to the bulb except bulb-grasp-pose
-        "bulb-close-force",
-        "descent-until-contact",
-        "feed-must-match-lead",
-        "lattice-pitch-budget",
-        "lead-by-overshoot",
-        "mirrored-shear-slide",
-        "one-call-approach",
-        "preserve-existing-grasp",
-        "reflex-stop-on-events",
-        "seat-by-slide-collapse",
-        "small-step-insertion",
-        "thread-direction-by-legs",
-        "wrist-limit-segmentation",
-        # protocol
-        "channel-selection",
-        "differential-across-states",
-        "grasp-verification",
-        "no-absolute-without-reference",
-        "regrasp-after-slip",
-        "tactile-cannot-locate",
-        # sense
-        "confidence-gate",
-        "contact-flag-is-range",
-        "depth-grip-scale",
-        "shear-vs-displacement",
-        "slip-pair-baseline",
-    )

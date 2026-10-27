@@ -1,0 +1,26 @@
+schema: tactile_keys.v1
+
+# Mined cards: a tactile situation, the line that belongs with it, and the
+# evidence it was mined from.  Empty until a run has been mined -- the
+# resident text in core.yaml is the whole library until then, and that is a
+# supported state, not a broken one.
+#
+# A card:
+#
+#   - id: dead-pad-after-close
+#     tasks: [blind_pick_balls]      # [] or omitted = any task
+#     when: {disp_gap: split, coh: lost}
+#     do: >-
+#       Read the depth of the pad that is still coherent; the quiet pad's
+#       field was dragged with the jaw and its numbers describe the drag.
+#     why: Optional provenance for a human. Not delivered.
+#     evidence: [blind_pick_balls/seed_3/trial_12]
+#     status: observed               # or hypothesis
+#
+# `when` must name at least one dimension from
+# capx.tactile_memory.signature.BANDS.  `do` is what the model reads when
+# the card fires, so it is written action-first and stays under 240 chars.
+# A card may not name check_success, a reward or a ground-truth field: the
+# line has to survive being handed to a task with no ground truth at all.
+
+cards: []

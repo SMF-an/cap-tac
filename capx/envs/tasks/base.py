@@ -158,11 +158,11 @@ class CodeExecutionEnvBase(Env):
 
     # ---- Private methods ----
     def _task_name(self) -> str:
-        """The simulator's name for this task, used to route tactile skills.
+        """The simulator's name for this task, used to route tactile text.
 
-        That name is what the server knows the task by, and the key the
-        taxonomy in `capx.tactile_skills` routes on.  Three places can hold
-        it, in the order they are consulted:
+        That name is what the server knows the task by, and the key the core
+        block and the card bank route on.  Three places can hold it, in the
+        order they are consulted:
 
           * the built low-level env — whatever it calls itself is what the
             server answers to;
@@ -211,42 +211,33 @@ class CodeExecutionEnvBase(Env):
             return True
         return any("get_tactile_data" in api.functions() for api in apis.values())
 
-    def _tactile_skill_block(self) -> str:
-        """The tactile-skill block this task's prompt ends with.
+    def _tactile_prompt_block(self) -> str:
+        """The resident tactile text this task's prompt ends with.
 
-        Delivered by default to every task the library's taxonomy knows, which
-        is every UniVTAC task that can read the gel: the reading and acting
-        recipes the API doc no longer carries are useless if nothing hands them
-        over, and worse than useless to a task that has no tactile API at all.
-        A task outside the taxonomy -- anything not driven through the UniVTAC
-        API -- gets nothing, since no skill routes to it.
+        Two kinds of text, both delivered before the robot moves: the
+        principles that hold for any task able to read this sensor, and the
+        lines that are true on this task alone
+        (:mod:`capx.tactile_memory.core`).  The mined cards are deliberately
+        not here -- they are retrieved by the live reading, so the narrow,
+        numeric part of the library is only paid for when the gel says it
+        applies.
 
-        A task can override the routing:
+        Delivered only to a task that can actually read the gel.  The
+        ablation configs keep the task name while swapping the tactile API
+        for the motion-only one, and principles about a sensor the robot does
+        not carry are worse than silence: they invite readings that cannot
+        be taken.  An empty or absent `_apis` is read as "cannot tell", which
+        delivers.
 
-            tactile_skills = ()              # deliver nothing
-            tactile_skills = ("skill-name",) # name the skills directly
-
-        and `tactile_skills_verbose = True` swaps the one-line-per-skill form
-        for each skill's whole body.  Naming skills directly skips the tactile
-        check: an explicit list is a deliberate choice.
+        A task can opt out with ``tactile_memory = False``.
         """
-        from capx.tactile_skills import default_library
-
-        verbose = bool(getattr(self, "tactile_skills_verbose", False))
-        wanted = getattr(self, "tactile_skills", True)
-        if wanted is not True:
-            if not wanted:
-                return ""
-            library = default_library()
-            skills = [library.get(name) for name in wanted]
-            body = "\n".join(s.render(compact=not verbose) for s in skills)
-            return f"TACTILE SKILLS (named by {type(self).__name__}):\n{body}".strip()
-
-        library = default_library()
-        task = self._task_name()
-        if library.task_type_of(task) is None or not self._reads_the_gel():
+        if not getattr(self, "tactile_memory", True):
             return ""
-        return library.render_for_task(task, compact=not verbose)
+        if not self._reads_the_gel():
+            return ""
+        from capx.tactile_memory import default_core
+
+        return default_core().render(self._task_name())
 
     def _get_complete_prompt(self) -> str:
         """
@@ -261,7 +252,7 @@ class CodeExecutionEnvBase(Env):
             # docs.append(f"- {name}:\n{text.strip()}")
             docs.append(f"\n{text.strip()}")
         prompt = f"{self._task_prompt}\nAPIs:\n" + "\n".join(docs)
-        skills = self._tactile_skill_block()
+        skills = self._tactile_prompt_block()
         return f"{prompt}\n\n{skills}" if skills else prompt
 
     def _exec_user_code(self, code: str) -> dict[str, Any]:

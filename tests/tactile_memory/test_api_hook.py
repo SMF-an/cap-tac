@@ -1,0 +1,101 @@
+"""The one place the library speaks mid-trial: get_tactile_data.
+
+A card is retrieved by a reading, so the answer to "when does the model hear
+about it" is "when it looks at the gel".  These tests pin that: the block
+appears under the scalars, the reading itself is unchanged, and the shipped
+(empty) bank prints nothing at all.
+"""
+
+from __future__ import annotations
+
+from unittest import mock
+
+import pytest
+
+from capx.integrations.tactile.univtac_api import UniVTACTactileApi
+from capx.tactile_memory import recall
+
+
+SEATED = {
+    "left_contact": True, "right_contact": True,
+    "left_depth_mm": 28.0, "right_depth_mm": 28.1,
+    "left_marker_displacement_px": 22.8, "right_marker_displacement_px": 1.6,
+    "left_marker_coherence": 0.09, "right_marker_coherence": 0.62,
+    "left_marker_shear_dx": -0.2, "left_marker_shear_dy": 0.0,
+    "right_marker_shear_dx": 0.2, "right_marker_shear_dy": 0.0,
+    "left_marker_anisotropy": 1.02, "right_marker_anisotropy": 1.01,
+}
+
+BANK = """\
+schema: tactile_keys.v1
+cards:
+  - id: dead-pad-after-close
+    when: {disp_gap: split, coh_gap: split}
+    do: Read the pad that is still coherent; the quiet one describes the drag.
+"""
+
+
+class _Env:
+    task_name = "blind_pick_balls"
+
+
+def _client(env=None) -> UniVTACTactileApi:
+    return UniVTACTactileApi(env if env is not None else object(),
+                             server_url="http://test:8120")
+
+
+def _get(api, readings: dict, capsys):
+    response = mock.Mock()
+    response.json.return_value = dict(readings)
+    response.raise_for_status.return_value = None
+    with mock.patch("capx.integrations.tactile.univtac_api.requests.get",
+                    return_value=response):
+        data = api.get_tactile_data()
+    return data, capsys.readouterr().out
+
+
+@pytest.fixture
+def mined_bank(tmp_path, monkeypatch):
+    path = tmp_path / "bank.yaml"
+    path.write_text(BANK, encoding="utf-8")
+    monkeypatch.setenv(recall.ENV_VAR, str(path))
+    return path
+
+
+def test_a_matching_card_is_printed_under_the_reading(mined_bank, capsys):
+    data, out = _get(_client(_Env()), SEATED, capsys)
+    assert "TACTILE MATCHES" in out
+    assert "the quiet one describes the drag" in out
+    # The block is output, not return: the reading's shape is unchanged.
+    assert not any("MATCH" in key for key in data)
+
+
+def test_the_reading_is_printed_before_the_cards(mined_bank, capsys):
+    _data, out = _get(_client(_Env()), SEATED, capsys)
+    assert out.index("Tactile:") < out.index("TACTILE MATCHES")
+
+
+def test_a_reading_that_matches_nothing_prints_no_block(mined_bank, capsys):
+    quiet = {**SEATED, "left_marker_displacement_px": 2.0,
+             "left_marker_coherence": 0.55}
+    _data, out = _get(_client(_Env()), quiet, capsys)
+    assert "TACTILE MATCHES" not in out
+
+
+def test_the_shipped_bank_is_silent(monkeypatch, capsys):
+    monkeypatch.delenv(recall.ENV_VAR, raising=False)
+    _data, out = _get(_client(_Env()), SEATED, capsys)
+    assert "TACTILE MATCHES" not in out
+
+
+def test_a_task_scoped_card_needs_the_task_name(mined_bank, capsys):
+    scoped = BANK.replace("    when:", "    tasks: [blind_pick_balls]\n    when:")
+    mined_bank.write_text(scoped, encoding="utf-8")
+    # The env the client is built with is where the name comes from.
+    _data, out = _get(_client(object()), SEATED, capsys)
+    assert "TACTILE MATCHES" not in out
+
+
+def test_the_api_reads_the_task_name_off_its_env():
+    assert _client(_Env())._task_name() == "blind_pick_balls"
+    assert _client(object())._task_name() == ""

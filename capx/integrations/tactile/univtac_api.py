@@ -6,9 +6,11 @@ LLM prompt (via :meth:`ApiBase.combined_doc`), so it describes what the
 function and its arguments ARE: ranges, units, hard limits, and the fields
 the return carries.  How to USE a function on a task -- which reading to
 take, what to compare it against, which trap the obvious version falls
-into -- is not written here.  That lives in the tactile skill library
-(``capx.tactile_skills``), which is delivered to the task alongside this doc,
-so each rule has one owner instead of a copy in every prompt.  Functions
+into -- is not written here.  That lives in the tactile memory
+(``capx.tactile_memory``): the few principles that hold for this sensor ship
+with the task prompt, and the mined cards are printed by ``get_tactile_data``
+when the live reading matches them, so each rule has one owner instead of a
+copy in every prompt.  Functions
 listed in ``_prompt_hidden`` stay callable at execution time but are excluded
 from the prompt (see ``check_success``).
 
@@ -30,6 +32,7 @@ from PIL import Image
 from capx.envs.base import BaseEnv
 from capx.integrations.base_api import ApiBase
 from capx.integrations.tactile import trace as tactile_trace
+from capx.tactile_memory import recall as tactile_memory
 
 # Default server URL — override via env var UNIVTAC_SERVER_URL
 _DEFAULT_SERVER = "http://127.0.0.1:8120"
@@ -166,6 +169,15 @@ class UniVTACTactileApi(ApiBase):
         # Reference (L, R) marker displacements for delta-based slip detection.
         # None until the first detect_slip call establishes it.
         self._slip_baseline: tuple[float, float] | None = None
+
+    def _task_name(self) -> str:
+        """The simulator's name for this task, for scoping mined cards.
+
+        The same name the task's prompt block routes on.  An empty answer is
+        not an error here -- it only means that task-scoped cards cannot
+        fire, while cross-task ones still can.
+        """
+        return str(getattr(self._env, "task_name", "") or "")
 
     # ------------------------------------------------------------------
     # ApiBase interface
@@ -593,6 +605,11 @@ class UniVTACTactileApi(ApiBase):
         this is the read that costs no motion.  The marker images are not
         returned by this call, only the scalars listed below.
 
+        This is also the only call that consults the tactile memory: the
+        reading is keyed, and any mined card whose situation it matches is
+        printed under the scalars.  The return shape does not change — the
+        line arrives in the output, the way every other API result does.
+
         Every numeric field below falls back to 0.0 when its sensor did not
         report.  0.0 is out of range for all of them, so a 0.0 means the
         reading is MISSING, not that it is zero — and a missing pad is not a
@@ -692,6 +709,12 @@ class UniVTACTactileApi(ApiBase):
               f"{_fmt(data.get('right_marker_shear_dy'))})px "
               f"L_aniso={_fmt(data.get('left_marker_anisotropy'))} "
               f"R_aniso={_fmt(data.get('right_marker_anisotropy'))}{relief}")
+        # The library speaks only here: a card is retrieved by a reading, so
+        # it has nothing to say before one has been taken.  Every call is
+        # keyed, but only the matching cards cost the model any words.
+        matched = tactile_memory.match(data, task=self._task_name())
+        if matched.text:
+            print(matched.text)
         # Strip images before returning to avoid huge logs
         return {k: v for k, v in data.items() if "base64" not in k}
 
