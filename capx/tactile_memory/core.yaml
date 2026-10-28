@@ -1,0 +1,63 @@
+schema: tactile_core.v1
+
+# The part of the library that is always delivered.
+#
+# A principle goes here only if it is true of every task that can read the
+# gel and cannot be recovered from the API docstring alone -- the docstring
+# says what a field IS, so it cannot also say what a field is NOT.  Six is
+# the budget; anything narrower than a principle belongs in the card bank,
+# where it only costs words when the reading matches it.
+#
+# Written as facts about the world, not as procedures: a principle that
+# tells the model what is true lets it decide; one that tells it what to do
+# is a strategy nobody measured.
+
+principles:
+  - id: no-single-reading
+    text: >-
+      Every field here is a state, not an event. One reading says where the
+      gel is; only the difference between two readings says what changed, and
+      a difference taken across an unrecorded command is not a difference.
+  - id: one-channel-one-question
+    text: >-
+      Each field answers exactly one question -- depth how hard, marker
+      displacement how far the gel moved, coherence whether it moved together,
+      shear which way it was dragged, relief what shape the surface is. Asking
+      a field a question it does not answer still returns a confident number.
+  - id: zero-means-missing
+    text: >-
+      0.0 is the fallback for a pad that did not report, and it sits at the
+      wrong end of every scale: a dead pad reads like the firmest grip. The
+      contact flag is what says whether a pad is talking. The shear vector is
+      the one field where 0.0 is also an honest reading.
+  - id: tactile-cannot-locate
+    text: >-
+      The gel knows whether something touched it and what that touch was
+      like; it never knows where the object is. Position comes from the arm's
+      own state, and a grasp centred by tactile feedback is a guess with extra
+      steps.
+  - id: readable-is-not-identity
+    text: >-
+      A reading is a function of the command that produced it as much as of
+      the object: the same object read at a different grip width, depth or
+      pose is a different number. Only readings taken the same way compare.
+  - id: the-object-is-the-sensor
+    text: >-
+      The gel measures by deforming what it touches as much as itself. Past a
+      certain squeeze the reading describes the crush, not the surface, and a
+      measurement that damaged what it measured cannot be repeated.
+
+# Facts that are true on one task and unrecoverable if missed. These stay
+# resident because the cost of missing them is a whole run, while the cost
+# of carrying them is one line.
+task_lines:
+  blind_pick_balls:
+    - >-
+      A gripper close that raises is the ball seated between the pads, not a
+      failed grasp: the pads stop on the ball two or more millimetres short of
+      the command, and the refusal is the arm reporting that it did.
+    - >-
+      Ball height is out of reach outside x = 0.38 to 0.63. There the arm
+      cannot bring the pads down to a ball's centre: it stops with both gels
+      on the far plane, and a descent commanded anyway can be refused
+      outright.

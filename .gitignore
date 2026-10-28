@@ -35,6 +35,11 @@ outputs**
 curobo_debug/
 =*
 core.*
+# ...but not the tactile library's resident block, whose name collides with
+# the core-dump pattern above.  Unignoring it matters: load_core() treats a
+# missing file as "no principles", so a checkout without it silently ships an
+# empty prompt block instead of failing.
+!capx/tactile_memory/core.yaml
 wandb/
 .webui_secret_key
 
