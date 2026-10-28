@@ -52,13 +52,27 @@ def write(tmp_path, text: str):
     return path
 
 
-def test_the_shipped_bank_is_empty_and_that_is_supported():
+def test_the_shipped_bank_loads_and_fires_only_where_it_applies():
+    # An empty bank is a supported state; a bank that does not load is not
+    # -- it is a typo that silently turns the mined knowledge off.  And a
+    # card that fires on a reading it does not describe is worse than none.
     from capx.tactile_memory.recall import BANK_PATH
 
     bank = load_bank(BANK_PATH)
-    assert len(bank) == 0
-    assert bank.recall(seated_key(), task="blind_pick_balls") == []
     assert bank.render([]) == ""
+    # A plain two-pad seat says nothing about the surface: no card claims it.
+    assert bank.recall(seated_key(), task="blind_pick_balls") == []
+    rough = key_from_readings({
+        "left_contact": True, "right_contact": True,
+        "left_depth_mm": 26.5, "right_depth_mm": 26.1,
+        "left_marker_displacement_px": 7.0, "right_marker_displacement_px": 7.0,
+        "left_marker_coherence": 0.5, "right_marker_coherence": 0.5,
+        "left_height_roughness_mm": 0.15, "right_height_roughness_mm": 0.16,
+    })
+    fired = bank.recall(rough, task="blind_pick_balls")
+    assert fired and all("relief" in card.when for card in fired)
+    # Scoped to the task that measured it, and to no other.
+    assert bank.recall(rough, task="lift_can") == []
 
 
 def test_an_absent_bank_file_loads_as_empty(tmp_path):

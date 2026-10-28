@@ -1,9 +1,9 @@
 schema: tactile_keys.v1
 
 # Mined cards: a tactile situation, the line that belongs with it, and the
-# evidence it was mined from.  Empty until a run has been mined -- the
-# resident text in core.yaml is the whole library until then, and that is a
-# supported state, not a broken one.
+# evidence it was mined from.  The resident text in core.yaml carries what
+# has to be known before the robot moves; a card carries what only matters
+# once the reading is in front of the model.
 #
 # A card:
 #
@@ -23,4 +23,19 @@ schema: tactile_keys.v1
 # A card may not name check_success, a reward or a ground-truth field: the
 # line has to survive being handed to a task with no ground truth at all.
 
-cards: []
+cards:
+  - id: relief-under-a-squeeze-is-the-crush
+    tasks: [blind_pick_balls]
+    when: {relief: rough}
+    do: >-
+      Compare it against a seated reading: at a fixed 0.6 opening (48 mm)
+      smooth reads 0.02-0.04 and dotted 0.09-0.25. Under a depth-servoed
+      close the ball is crushed instead, and a smooth rubber one reads 0.15.
+    why: >-
+      blind_pick_balls seed 8 trial 08: the program closed to a 26.5 mm gel
+      depth, read relief 0.152/0.155 at ~120 N a side, called the ball
+      dotted and carried a rubber one (the server's physical trace names
+      ball 4, rubber, soft).  The task's own calibration seats at a fixed
+      48 mm opening, where the same channel separates the surfaces.
+    evidence: [blind_pick_balls/seed_8/trial_08]
+    status: observed
