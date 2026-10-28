@@ -4,14 +4,16 @@
 The library's cards are supposed to be earned, not invented.  This script is
 the earning step.  It reads every tactile reading a trial produced -- from a
 live ``CAPX_TACTILE_TRACE`` JSONL when one exists, otherwise from the
-``Tactile:`` lines in the trial's ``summary.txt`` -- keys each reading with
-:func:`capx.tactile_memory.signature.key_from_readings`, and reports, per
-task and per band, how many trials that passed through the band went on to
+``Tactile:`` lines in the trial's ``summary.txt`` -- keys the trial's deepest
+reading with :func:`capx.tactile_memory.signature.key_from_readings`, and
+reports, per task and per band, how many trials that read the band went on to
 work and how many did not.
 
-The unit is the TRIAL, not the reading.  A chatty trial takes hundreds of
-readings and would otherwise outvote a quiet one; "how many trials passed
-through this band" is the question a card actually asks.
+One reading per trial, not every reading.  Keying everything a trial looked
+at makes almost every band cover almost every trial -- that is a fact about
+a moving arm, not about an outcome -- and the table could never separate
+anything.  The deepest reading is the one where the pads had the most to say
+and where the grasp either worked or did not.
 
 It writes a report, never a bank.  A band that separates outcomes is a fact
 about the sensor; the line a card carries is a judgement about what to do
@@ -25,21 +27,28 @@ rather than after a month of prompt tuning.
 Example:
     python scripts/build_tactile_bank.py --root outputs
 
-Two things the report cannot tell you, both worth remembering:
+Two layouts are read, because a run can leave either:
+
+  * one trace per run, with a ``trial`` column on every row (what the
+    runner writes today -- one process executes all the trials);
+  * one trace inside each trial directory (what a process running a single
+    trial leaves behind).
+
+Three things the report cannot tell you, all worth remembering:
 
   * A band's ``bad share`` is only interesting next to the task's own base
-    rate, which is printed with the run.  Every band a healthy trial passes
-    through will show a bad share close to that base -- that is the floor,
-    not a signal.
+    rate, which is printed with the run.  A band holding most of a task's
+    trials will show a bad share close to that base -- that is the floor,
+    not a signal.  What separates is a band that holds few trials and most
+    of the failures.
   * Historical summaries predate the marker shear and anisotropy fields, so
-    on those trials ``shear`` and ``aniso`` are constant and separate
-    nothing.  Dimensions that never vary are listed separately instead of
-    being ranked with the rest.
-  * A summary only records the reads the model chose to make, so two
-    consecutive entries there may be a whole grasp apart.  The ``*_trend``
-    dimensions still mean "what changed between these two looks", which is
-    a longer span than a trace's adjacent rows -- read them as "the trial
-    saw the depth fall / stop", not as a rate.
+    on those trials ``shear``, ``shear_axis`` and ``aniso`` are constant and
+    separate nothing.  A dimension that never varied is listed as such
+    instead of being ranked with the rest.
+  * A summary only records the reads the model chose to make, so the two
+    readings a ``*_trend`` dimension compares may be a whole grasp apart.
+    Read them as "the trial saw the depth falling when it was deepest", not
+    as a rate.
 """
 
 from __future__ import annotations
@@ -50,10 +59,11 @@ import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from capx.tactile_memory.signature import DIMENSIONS, key_from_readings  # noqa: E402
+from capx.tactile_memory.signature import key_from_readings  # noqa: E402
 from capx.tactile_memory.tasks import TASK_TYPES  # noqa: E402
 
 TRACE_NAME = "tactile_trace.jsonl"
@@ -61,6 +71,9 @@ SUMMARY_NAME = "summary.txt"
 
 #: A trial directory ends with the outcome the framework recorded.
 _OUTCOME = re.compile(r"taskcompleted_([01])$")
+
+#: The trial's number, which is also what the trace's ``trial`` column holds.
+_NUMBER = re.compile(r"^trial_(\d+)")
 
 #: One field of the printed ``Tactile:`` line, as it has been written since
 #: the line was introduced: ``L_depth=28.49mm``, ``R_contact=True``.
@@ -103,6 +116,36 @@ def outcome_of(directory: Path) -> str | None:
     return "success" if match.group(1) == "1" else "failure"
 
 
+def number_of(directory: Path) -> int | None:
+    """The trial number a directory is named after, if it is named that way."""
+    match = _NUMBER.match(directory.name)
+    return int(match.group(1)) if match else None
+
+
+def labelled_trials(root: Path) -> dict[tuple[Path, int], tuple[str, str, Path]]:
+    """Every trial directory under ``root`` that states its own outcome.
+
+    Keyed by (run directory, trial number), because two models' runs of the
+    same task both have a ``trial_01`` and they are different trials.
+
+    Returns:
+        (run directory, trial number) -> (task, outcome, directory).  A
+        directory whose name carries no number, or no outcome, is not a
+        labelled trial.
+    """
+    found: dict[tuple[Path, int], tuple[str, str, Path]] = {}
+    for directory in sorted(root.rglob("trial_*")):
+        if not directory.is_dir():
+            continue
+        outcome = outcome_of(directory)
+        number = number_of(directory)
+        if outcome is None or number is None:
+            continue
+        found[(directory.parent, number)] = (task_of(directory) or "(unknown)",
+                                             outcome, directory)
+    return found
+
+
 def readings_from_printed(path: Path) -> list[dict]:
     """Every ``Tactile:`` line in a trial summary, as reading dicts.
 
@@ -130,18 +173,23 @@ def readings_from_printed(path: Path) -> list[dict]:
     return readings
 
 
-def read_trace(path: Path) -> list[dict]:
-    """Every reading in one trace file, skipping a half-written last line."""
-    readings = []
+def read_trace(path: Path) -> list[tuple[Any, dict]]:
+    """Every row in one trace file, as ``(trial, readings)``.
+
+    A half-written last line -- a process killed mid-append -- is skipped
+    rather than failing the run: the rows before it are still good.
+    """
+    rows: list[tuple[Any, dict]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
         try:
-            readings.append(json.loads(line).get("readings") or {})
+            row = json.loads(line)
         except json.JSONDecodeError:
             continue
-    return readings
+        rows.append((row.get("trial"), row.get("readings") or {}))
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -149,29 +197,107 @@ def read_trace(path: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def bands_of(directory: Path) -> list[str] | None:
-    """The ``dimension=band`` pairs one trial passed through, or None.
+def _number(value: Any) -> float | None:
+    """One field as a number, with the API's 0.0-means-missing convention."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if number == 0.0 else number
 
-    A trial contributes each band once, however many readings carried it.
-    Readings are replayed in file order so the ``*_trend`` dimensions see
-    the reading before each one, exactly as a live client does.
+
+def deepest(readings: list[dict]) -> int | None:
+    """Index of the reading taken at the moment of deepest contact.
+
+    A trial is not one situation.  Keying every reading it took and asking
+    which bands it visited makes almost every band cover almost every trial,
+    which is a property of the trial -- it moved the arm -- and not a
+    property of the outcome, so the table cannot separate anything however
+    good the sensor is.  One reading per trial restores a partition: the
+    deepest one, where the pads had the most to say and where a grasp either
+    worked or did not.
+
+    The first reading to reach the minimum wins, because the question is
+    "what did it look like when the pads first got as deep as they got".
+
+    Returns:
+        The index, or None when no reading reported a depth at all.
     """
-    readings: list[dict] = []
-    for trace in sorted(directory.rglob(TRACE_NAME)):
-        readings += read_trace(trace)
-    if not readings:
+    best, best_depth = None, None
+    for index, reading in enumerate(readings):
+        present = [value for value in
+                   (_number(reading.get(f"{side}_depth_mm"))
+                    for side in ("left", "right")) if value is not None]
+        if not present:
+            continue
+        depth = min(present)
+        if best_depth is None or depth < best_depth:
+            best, best_depth = index, depth
+    return best
+
+
+def band_at(readings: list[dict], index: int) -> list[str]:
+    """The ``dimension=band`` pairs of one reading, given its predecessor."""
+    previous = readings[index - 1] if index else None
+    return [f"{dimension}={band}" for dimension, band
+            in key_from_readings(readings[index], previous=previous).items()]
+
+
+def bands_of(readings: list[dict]) -> list[str]:
+    """The key of the trial's deepest reading: one situation per trial."""
+    index = deepest(readings)
+    return band_at(readings, index) if index is not None else []
+
+
+def units(root: Path) -> list[tuple[str, str, list[dict]]]:
+    """Every labelled trial under ``root``, as ``(task, outcome, readings)``.
+
+    A trace is split by its ``trial`` column, because a run writes one file
+    for every trial it executes.  A trace with no column belongs to the trial
+    directory it sits in.  Trials that produced no trace fall back to the
+    printed lines in their summary.
+    """
+    labelled = labelled_trials(root)
+    found: list[tuple[str, str, list[dict]]] = []
+    covered: set[tuple[Path, int]] = set()
+
+    for trace_file in sorted(root.rglob(TRACE_NAME)):
+        grouped: dict[Any, list[dict]] = defaultdict(list)
+        for trial, readings in read_trace(trace_file):
+            grouped[trial].append(readings)
+        for trial, readings in grouped.items():
+            if trial is None:
+                # No column: the file belongs to whatever trial it sits in.
+                outcome = outcome_of(trace_file.parent)
+                if outcome is None:
+                    continue
+                task = task_of(trace_file.parent) or "(unknown)"
+                number = number_of(trace_file.parent)
+                if number is not None:
+                    covered.add((trace_file.parent.parent, number))
+            else:
+                try:
+                    number = int(trial)
+                except (TypeError, ValueError):
+                    continue
+                hit = labelled.get((trace_file.parent, number))
+                if hit is None:
+                    continue  # a trial with no directory to read an outcome off
+                task, outcome = hit[0], hit[1]
+                covered.add((trace_file.parent, number))
+            found.append((task, outcome, readings))
+
+    for key, (task, outcome, directory) in sorted(labelled.items()):
+        if key in covered:
+            continue
+        readings: list[dict] = []
         for summary in sorted(directory.rglob(SUMMARY_NAME)):
             readings += readings_from_printed(summary)
-    if not readings:
-        return None
-    seen: set[str] = set()
-    previous: dict | None = None
-    for reading in readings:
-        seen.update(f"{dimension}={band}"
-                    for dimension, band
-                    in key_from_readings(reading, previous=previous).items())
-        previous = reading
-    return sorted(seen)
+        if readings:
+            found.append((task, outcome, readings))
+    return found
 
 
 def collect(roots: list[Path]) -> tuple[dict, dict]:
@@ -185,18 +311,9 @@ def collect(roots: list[Path]) -> tuple[dict, dict]:
     outcomes: dict[str, Counter] = defaultdict(Counter)
     bands: dict[tuple[str, str, str], Counter] = defaultdict(Counter)
     for root in roots:
-        for directory in sorted(root.rglob("trial_*")):
-            if not directory.is_dir():
-                continue
-            outcome = outcome_of(directory)
-            if outcome is None:
-                continue
-            seen = bands_of(directory)
-            if seen is None:
-                continue
-            task = task_of(directory) or "(unknown)"
+        for task, outcome, readings in units(root):
             outcomes[task][outcome] += 1
-            for entry in seen:
+            for entry in bands_of(readings):
                 dimension, _, band = entry.partition("=")
                 bands[(task, dimension, band)][outcome] += 1
     return outcomes, bands
@@ -226,13 +343,12 @@ def report(outcomes: dict, bands: dict, min_support: int) -> str:
             continue
         for dimension in sorted(by_dimension):
             rows = by_dimension[dimension]
-            # A dimension separates nothing when every band it took covers
-            # every trial: the reading is the same story in successes and
-            # failures alike.  That is the normal case for a channel the
-            # trial never exercised, and for the channels a historical
-            # summary cannot carry at all.
+            # One reading per trial means each dimension's bands partition
+            # the trials, so a single band covering all of them is a channel
+            # that never varied -- the normal case for a field an older
+            # server never sent, and for a task that never exercised it.
             if all(coverage == total for coverage, _b, _g, _d in rows):
-                lines.append(f"{dimension}: no band excludes any trial -- "
+                lines.append(f"{dimension}: one band covers every trial -- "
                              f"separates nothing here")
                 continue
             lines.append(f"{dimension}:")

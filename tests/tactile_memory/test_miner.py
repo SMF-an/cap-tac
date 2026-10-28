@@ -39,19 +39,34 @@ def miner():
     return module
 
 
-def trial(root: Path, task: str, outcome: str | None = "1") -> Path:
+def trial(root: Path, task: str, outcome: str | None = "1",
+          number: int = 1) -> Path:
     """A trial directory laid out the way the runner writes them."""
-    name = "trial_01" if outcome is None else f"trial_01_taskcompleted_{outcome}"
+    stem = f"trial_{number:02d}"
+    name = stem if outcome is None else f"{stem}_taskcompleted_{outcome}"
     path = root / "some-model" / f"univtac_{task}" / name
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def traced(directory: Path, readings: dict, rows: int = 4) -> Path:
+def traced(directory: Path, readings: dict, rows: int = 4,
+           trial: int | None = None) -> Path:
     path = directory / "tactile_trace.jsonl"
     path.write_text("\n".join(
-        json.dumps({"t": 0.0, "call": "/tactile", "args": {}, "readings": readings})
+        json.dumps({"t": 0.0, "trial": trial, "call": "/tactile",
+                    "args": {}, "readings": readings})
         for _ in range(rows)) + "\n", encoding="utf-8")
+    return path
+
+
+def run_trace(run_dir: Path, per_trial: dict[int, tuple[dict, int]]) -> Path:
+    """One trace file for the whole run, split by its ``trial`` column."""
+    lines = []
+    for number, (readings, rows) in per_trial.items():
+        lines += [json.dumps({"t": 0.0, "trial": number, "call": "/tactile",
+                              "args": {}, "readings": readings})] * rows
+    path = run_dir / "tactile_trace.jsonl"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
 
@@ -89,8 +104,8 @@ def test_the_outcome_comes_from_the_directory_name(miner, tmp_path):
 
 
 def test_success_and_failure_trials_are_counted_apart(miner, tmp_path):
-    traced(trial(tmp_path, "blind_pick_balls", "1"), GOOD, rows=3)
-    traced(trial(tmp_path, "blind_pick_balls", "0"), BAD, rows=2)
+    traced(trial(tmp_path, "blind_pick_balls", "1", number=1), GOOD, rows=3)
+    traced(trial(tmp_path, "blind_pick_balls", "0", number=2), BAD, rows=2)
     outcomes, bands = miner.collect([tmp_path])
     assert outcomes["blind_pick_balls"] == {"success": 1, "failure": 1}
     # The dead pad is the only trial with a split displacement gap.
@@ -98,6 +113,18 @@ def test_success_and_failure_trials_are_counted_apart(miner, tmp_path):
     assert bands[("blind_pick_balls", "disp_gap", "even")] == {"success": 1}
     assert bands[("blind_pick_balls", "disp", "heavy")] == {"failure": 1}
     assert bands[("blind_pick_balls", "disp", "moving")] == {"success": 1}
+
+
+def test_two_runs_of_the_same_task_are_counted_separately(miner, tmp_path):
+    # Every run numbers its trials from 01: the number is unique inside a
+    # run, not across the tree, and two models' trial 01 are two trials.
+    for model, readings, outcome in (("alpha", GOOD, "1"), ("beta", BAD, "0")):
+        directory = (tmp_path / model / "univtac_lift_can"
+                     / f"trial_01_taskcompleted_{outcome}")
+        directory.mkdir(parents=True)
+        traced(directory, readings)
+    outcomes, _bands = miner.collect([tmp_path])
+    assert outcomes["lift_can"] == {"success": 1, "failure": 1}
 
 
 def test_an_unlabelled_trial_directory_is_skipped(miner, tmp_path):
@@ -142,20 +169,61 @@ def test_a_half_written_line_does_not_fail_the_run(miner, tmp_path):
     assert len(miner.read_trace(path)) == 4
 
 
-def test_readings_are_replayed_in_order_so_trends_appear(miner, tmp_path):
-    # Two looks at a pad that has come in and stopped moving.
+def test_the_key_is_taken_at_the_deepest_reading(miner, tmp_path):
+    # Two looks at a pad that has come in and stopped moving.  The trial is
+    # one situation, not three: the deepest reading, with the reading
+    # before it as its "previous".
     directory = trial(tmp_path, "insert_hole", "0")
     rows = [{**GOOD, "left_depth_mm": 31.0, "right_depth_mm": 31.0},
             {**GOOD, "left_depth_mm": 27.0, "right_depth_mm": 27.0},
-            {**GOOD, "left_depth_mm": 27.0, "right_depth_mm": 27.0}]
+            {**GOOD, "left_depth_mm": 24.0, "right_depth_mm": 24.0}]
     path = directory / "tactile_trace.jsonl"
     path.write_text("\n".join(
         json.dumps({"t": float(index), "call": "/tactile", "args": {},
                     "readings": row}) for index, row in enumerate(rows)) + "\n",
         encoding="utf-8")
-    assert "depth_trend=falling" in miner.bands_of(directory)
-    assert "depth_trend=static" in miner.bands_of(directory)
-    assert "depth_trend=unknown" in miner.bands_of(directory)
+    readings = [row for _trial, row in miner.read_trace(path)]
+    assert miner.deepest(readings) == 2
+    bands = miner.bands_of(readings)
+    assert "depth=floor" in bands          # 24.5 mm, at the very end
+    assert "depth=face" not in bands
+    assert "depth_trend=falling" in bands  # still coming in when it stopped
+
+
+# ---------------------------------------------------------------------------
+# One trace for the whole run
+# ---------------------------------------------------------------------------
+
+
+def test_a_run_trace_is_split_by_its_trial_column(miner, tmp_path):
+    # What the runner leaves today: one process, one file, every trial in it.
+    run_dir = trial(tmp_path, "blind_pick_balls", "1", number=1).parent
+    trial(tmp_path, "blind_pick_balls", "1", number=1)
+    trial(tmp_path, "blind_pick_balls", "0", number=2)
+    run_trace(run_dir, {1: (GOOD, 3), 2: (BAD, 2)})
+    outcomes, bands = miner.collect([tmp_path])
+    assert outcomes["blind_pick_balls"] == {"success": 1, "failure": 1}
+    assert bands[("blind_pick_balls", "disp_gap", "split")] == {"failure": 1}
+    assert bands[("blind_pick_balls", "disp_gap", "even")] == {"success": 1}
+
+
+def test_a_row_from_a_trial_with_no_directory_is_not_counted(miner, tmp_path):
+    # A crashed trial leaves rows but no artifacts, so its outcome is
+    # unknown; guessing one would put a made-up label behind a band.
+    run_dir = trial(tmp_path, "blind_pick_balls", "1", number=1).parent
+    run_trace(run_dir, {1: (GOOD, 2), 9: (BAD, 2)})
+    outcomes, bands = miner.collect([tmp_path])
+    assert outcomes["blind_pick_balls"] == {"success": 1}
+    assert ("blind_pick_balls", "disp_gap", "split") not in bands
+
+
+def test_a_trial_in_the_run_trace_is_not_counted_twice_from_its_summary(
+        miner, tmp_path):
+    directory = trial(tmp_path, "blind_pick_balls", "1", number=1)
+    run_trace(directory.parent, {1: (GOOD, 2)})
+    summarised(directory, [PRINTED])
+    outcomes, _bands = miner.collect([tmp_path])
+    assert outcomes["blind_pick_balls"] == {"success": 1}
 
 
 # ---------------------------------------------------------------------------
@@ -176,8 +244,8 @@ def _rows_under(text: str, dimension: str) -> list[str]:
 
 
 def test_the_report_is_read_against_the_tasks_own_base_rate(miner, tmp_path, capsys):
-    traced(trial(tmp_path, "blind_pick", "1"), GOOD)
-    traced(trial(tmp_path, "blind_pick", "0"), BAD)
+    traced(trial(tmp_path, "blind_pick", "1", number=1), GOOD)
+    traced(trial(tmp_path, "blind_pick", "0", number=2), BAD)
     miner.main(["--root", str(tmp_path), "--min-support", "1"])
     out = capsys.readouterr().out
     assert "## blind_pick  (2 trials, 1 bad, base bad share 0.50)" in out
@@ -192,13 +260,13 @@ def test_a_band_below_the_support_floor_is_not_reported(miner, tmp_path, capsys)
 
 
 def test_a_dimension_that_never_varies_is_not_ranked(miner, tmp_path, capsys):
-    # Every trial saw the same shear band, so it separates nothing and
+    # Every trial read the same shear band, so it separates nothing and
     # saying "bad share 0.50" about it would be noise dressed as a finding.
-    traced(trial(tmp_path, "lift_can", "1"), GOOD)
-    traced(trial(tmp_path, "lift_can", "0"), BAD)
+    traced(trial(tmp_path, "lift_can", "1", number=1), GOOD)
+    traced(trial(tmp_path, "lift_can", "0", number=2), BAD)
     miner.main(["--root", str(tmp_path), "--min-support", "1"])
     out = capsys.readouterr().out
-    assert "shear: no band excludes any trial" in out
+    assert "shear: one band covers every trial" in out
 
 
 def test_no_roots_is_a_usage_error(miner):
