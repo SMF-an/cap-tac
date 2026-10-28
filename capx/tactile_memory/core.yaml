@@ -62,3 +62,9 @@ task_lines:
       travel, so a descent aimed at one ends 11 mm from its goal at 0.38 with
       both gels still on the far plane, and the call comes back a motion
       failure that ends the program.
+    - >-
+      The pads, not the descent, put the ball in the bowl: at a pad centre
+      near 0.11 the ball hangs clear of the rim and inside the mouth, so
+      opening the gripper there drops it in. Commanded lower, the descent
+      stops a few millimetres short and comes back a motion failure -- a
+      placement too, because the pads still hold it over the bowl.
