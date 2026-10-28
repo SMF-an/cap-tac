@@ -29,8 +29,10 @@ Example:
 
 Two layouts are read, because a run can leave either:
 
-  * one trace per run, with a ``trial`` column on every row (what the
-    runner writes today -- one process executes all the trials);
+  * one trace per run, with a ``run`` and a ``trial`` column on every row
+    (what the runner writes today -- one process executes all the trials,
+    and a re-run appends a second set of the same trial numbers to the same
+    file);
   * one trace inside each trial directory (what a process running a single
     trial leaves behind).
 
@@ -122,27 +124,25 @@ def number_of(directory: Path) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def labelled_trials(root: Path) -> dict[tuple[Path, int], tuple[str, str, Path]]:
+def labelled_trials(root: Path) -> list[tuple[str, str, Path]]:
     """Every trial directory under ``root`` that states its own outcome.
 
-    Keyed by (run directory, trial number), because two models' runs of the
-    same task both have a ``trial_01`` and they are different trials.
-
     Returns:
-        (run directory, trial number) -> (task, outcome, directory).  A
-        directory whose name carries no number, or no outcome, is not a
-        labelled trial.
+        ``(task, outcome, directory)`` per directory, in path order.  One
+        directory is one trial even when its number repeats: a re-run of a
+        seed that ends differently leaves a second directory beside the
+        first instead of overwriting it, and the two attempts are two
+        trials.  A directory whose name carries no number, or no outcome,
+        is not a labelled trial.
     """
-    found: dict[tuple[Path, int], tuple[str, str, Path]] = {}
+    found: list[tuple[str, str, Path]] = []
     for directory in sorted(root.rglob("trial_*")):
         if not directory.is_dir():
             continue
         outcome = outcome_of(directory)
-        number = number_of(directory)
-        if outcome is None or number is None:
+        if outcome is None or number_of(directory) is None:
             continue
-        found[(directory.parent, number)] = (task_of(directory) or "(unknown)",
-                                             outcome, directory)
+        found.append((task_of(directory) or "(unknown)", outcome, directory))
     return found
 
 
@@ -173,13 +173,14 @@ def readings_from_printed(path: Path) -> list[dict]:
     return readings
 
 
-def read_trace(path: Path) -> list[tuple[Any, dict]]:
-    """Every row in one trace file, as ``(trial, readings)``.
+def read_trace(path: Path) -> list[tuple[Any, Any, dict]]:
+    """Every row in one trace file, as ``(run, trial, readings)``.
 
-    A half-written last line -- a process killed mid-append -- is skipped
-    rather than failing the run: the rows before it are still good.
+    Either column is None on a row written before it existed.  A half-written
+    last line -- a process killed mid-append -- is skipped rather than failing
+    the run: the rows before it are still good.
     """
-    rows: list[tuple[Any, dict]] = []
+    rows: list[tuple[Any, Any, dict]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -188,7 +189,7 @@ def read_trace(path: Path) -> list[tuple[Any, dict]]:
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
-        rows.append((row.get("trial"), row.get("readings") or {}))
+        rows.append((row.get("run"), row.get("trial"), row.get("readings") or {}))
     return rows
 
 
@@ -254,43 +255,54 @@ def bands_of(readings: list[dict]) -> list[str]:
 def units(root: Path) -> list[tuple[str, str, list[dict]]]:
     """Every labelled trial under ``root``, as ``(task, outcome, readings)``.
 
-    A trace is split by its ``trial`` column, because a run writes one file
-    for every trial it executes.  A trace with no column belongs to the trial
-    directory it sits in.  Trials that produced no trace fall back to the
-    printed lines in their summary.
+    A trace is split by its ``run`` and ``trial`` columns, because a run
+    writes one file for every trial it executes and a re-run appends a second
+    set of the same trial numbers to that file.  A trace with no trial column
+    belongs to the trial directory it sits in.  Trials that produced no trace
+    fall back to the printed lines in their summary.
+
+    A trial number naming more than one directory -- a re-run that ended
+    differently -- cannot be joined to the run-level rows: the run column
+    says which rows are one attempt, not which attempt a directory is.
+    Those rows are dropped, and each directory's own printed lines carry
+    that trial instead.
     """
     labelled = labelled_trials(root)
+    by_number: dict[tuple[Path, int], list[tuple[str, str, Path]]] = defaultdict(list)
+    for entry in labelled:
+        by_number[(entry[2].parent, number_of(entry[2]))].append(entry)
+
     found: list[tuple[str, str, list[dict]]] = []
-    covered: set[tuple[Path, int]] = set()
+    covered: set[Path] = set()
 
     for trace_file in sorted(root.rglob(TRACE_NAME)):
-        grouped: dict[Any, list[dict]] = defaultdict(list)
-        for trial, readings in read_trace(trace_file):
-            grouped[trial].append(readings)
-        for trial, readings in grouped.items():
+        grouped: dict[tuple[Any, Any], list[dict]] = defaultdict(list)
+        for run, trial, readings in read_trace(trace_file):
+            grouped[(run, trial)].append(readings)
+        for (_run, trial), readings in grouped.items():
             if trial is None:
                 # No column: the file belongs to whatever trial it sits in.
                 outcome = outcome_of(trace_file.parent)
                 if outcome is None:
                     continue
                 task = task_of(trace_file.parent) or "(unknown)"
-                number = number_of(trace_file.parent)
-                if number is not None:
-                    covered.add((trace_file.parent.parent, number))
+                covered.add(trace_file.parent)
             else:
                 try:
                     number = int(trial)
                 except (TypeError, ValueError):
                     continue
-                hit = labelled.get((trace_file.parent, number))
-                if hit is None:
-                    continue  # a trial with no directory to read an outcome off
-                task, outcome = hit[0], hit[1]
-                covered.add((trace_file.parent, number))
+                hits = by_number.get((trace_file.parent, number), [])
+                if len(hits) != 1:
+                    # No directory to read an outcome off, or more than one
+                    # claiming the same number.
+                    continue
+                task, outcome = hits[0][0], hits[0][1]
+                covered.add(hits[0][2])
             found.append((task, outcome, readings))
 
-    for key, (task, outcome, directory) in sorted(labelled.items()):
-        if key in covered:
+    for task, outcome, directory in labelled:
+        if directory in covered:
             continue
         readings: list[dict] = []
         for summary in sorted(directory.rglob(SUMMARY_NAME)):

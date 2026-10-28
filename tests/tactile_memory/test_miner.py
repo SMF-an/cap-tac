@@ -59,12 +59,14 @@ def traced(directory: Path, readings: dict, rows: int = 4,
     return path
 
 
-def run_trace(run_dir: Path, per_trial: dict[int, tuple[dict, int]]) -> Path:
+def run_trace(run_dir: Path, per_trial: dict[int, tuple[dict, int]],
+              run: str | None = None) -> Path:
     """One trace file for the whole run, split by its ``trial`` column."""
     lines = []
     for number, (readings, rows) in per_trial.items():
-        lines += [json.dumps({"t": 0.0, "trial": number, "call": "/tactile",
-                              "args": {}, "readings": readings})] * rows
+        lines += [json.dumps({"t": 0.0, "run": run, "trial": number,
+                              "call": "/tactile", "args": {},
+                              "readings": readings})] * rows
     path = run_dir / "tactile_trace.jsonl"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
@@ -182,7 +184,7 @@ def test_the_key_is_taken_at_the_deepest_reading(miner, tmp_path):
         json.dumps({"t": float(index), "call": "/tactile", "args": {},
                     "readings": row}) for index, row in enumerate(rows)) + "\n",
         encoding="utf-8")
-    readings = [row for _trial, row in miner.read_trace(path)]
+    readings = [row for _run, _trial, row in miner.read_trace(path)]
     assert miner.deepest(readings) == 2
     bands = miner.bands_of(readings)
     assert "depth=floor" in bands          # 24.5 mm, at the very end
@@ -224,6 +226,47 @@ def test_a_trial_in_the_run_trace_is_not_counted_twice_from_its_summary(
     summarised(directory, [PRINTED])
     outcomes, _bands = miner.collect([tmp_path])
     assert outcomes["blind_pick_balls"] == {"success": 1}
+
+
+def test_a_rerun_appending_to_the_same_file_is_a_second_trial(miner, tmp_path):
+    # The runner appends, and a re-run repeats its trial numbers, so both
+    # attempts sit under trial=8 in one file.  They are two trials, and a
+    # trial's rows must not be mixed with the other attempt's.
+    directory = trial(tmp_path, "blind_pick_balls", "0", number=8)
+    lines = []
+    for run, readings in (("first", GOOD), ("second", BAD)):
+        lines += [json.dumps({"t": 0.0, "run": run, "trial": 8,
+                              "call": "/tactile", "args": {},
+                              "readings": readings})] * 2
+    (directory.parent / "tactile_trace.jsonl").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8")
+    outcomes, bands = miner.collect([tmp_path])
+    assert outcomes["blind_pick_balls"] == {"failure": 2}
+    assert bands[("blind_pick_balls", "disp_gap", "even")] == {"failure": 1}
+    assert bands[("blind_pick_balls", "disp_gap", "split")] == {"failure": 1}
+
+
+def test_rows_naming_two_directories_are_dropped_for_their_summaries(
+        miner, tmp_path):
+    # A re-run that ends differently leaves two directories for trial 8.
+    # The run column says which rows are one attempt, not which attempt a
+    # directory is, so the rows cannot be labelled with an outcome.  The
+    # printed lines sit inside the directory they belong to and can.
+    failed = trial(tmp_path, "blind_pick_balls", "0", number=8)
+    passed = trial(tmp_path, "blind_pick_balls", "1", number=8)
+    run_trace(failed.parent, {8: (BAD, 2)})
+    summarised(failed, [PRINTED])
+    summarised(passed, [PRINTED])
+    outcomes, bands = miner.collect([tmp_path])
+    assert outcomes["blind_pick_balls"] == {"success": 1, "failure": 1}
+    assert ("blind_pick_balls", "disp", "heavy") not in bands
+
+
+def test_two_directories_for_one_number_are_two_trials(miner, tmp_path):
+    summarised(trial(tmp_path, "lift_can", "0", number=3), [PRINTED])
+    summarised(trial(tmp_path, "lift_can", "1", number=3), [PRINTED])
+    outcomes, _bands = miner.collect([tmp_path])
+    assert outcomes["lift_can"] == {"success": 1, "failure": 1}
 
 
 # ---------------------------------------------------------------------------
