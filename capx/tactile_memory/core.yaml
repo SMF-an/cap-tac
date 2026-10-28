@@ -57,7 +57,8 @@ task_lines:
       failed grasp: the pads stop on the ball two or more millimetres short of
       the command, and the refusal is the arm reporting that it did.
     - >-
-      Ball height is out of reach outside x = 0.38 to 0.63. There the arm
-      cannot bring the pads down to a ball's centre: it stops with both gels
-      on the far plane, and a descent commanded anyway can be refused
-      outright.
+      Ball height is reachable only between x = 0.39 and 0.62. Outside it the
+      arm cannot put the pads on a ball's centre: it trades depth for eastward
+      travel, so a descent aimed at one ends 11 mm from its goal at 0.38 with
+      both gels still on the far plane, and the call comes back a motion
+      failure that ends the program.
