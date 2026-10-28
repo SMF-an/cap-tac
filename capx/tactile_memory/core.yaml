@@ -68,3 +68,10 @@ task_lines:
       opening the gripper there drops it in. Commanded lower, the descent
       stops a few millimetres short and comes back a motion failure -- a
       placement too, because the pads still hold it over the bowl.
+    - >-
+      Relief separates the two surfaces only when the grip is set by
+      opening: at 0.6 of the travel, 48 mm, a smooth ball reads 0.02-0.04
+      and a dotted one 0.09-0.25. Gripped to a gel-depth target instead, at
+      120 N a side, the pads squeeze the ball and a smooth rubber one reads
+      0.15 -- a dotted ball's number on an undotted ball, at a depth a real
+      seat also reaches.
