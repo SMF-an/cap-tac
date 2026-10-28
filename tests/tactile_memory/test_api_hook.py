@@ -99,3 +99,52 @@ def test_a_task_scoped_card_needs_the_task_name(mined_bank, capsys):
 def test_the_api_reads_the_task_name_off_its_env():
     assert _client(_Env())._task_name() == "blind_pick_balls"
     assert _client(object())._task_name() == ""
+
+
+# ---------------------------------------------------------------------------
+# The reading before this one
+# ---------------------------------------------------------------------------
+
+TREND_BANK = """\
+schema: tactile_keys.v1
+cards:
+  - id: surface-backing-away
+    when: {depth_trend: rising}
+    do: The surface is backing away; the pads are past the object.
+"""
+
+
+def _reads(api, readings: list[dict], capsys):
+    response = mock.Mock()
+    response.json.side_effect = [dict(reading) for reading in readings]
+    response.raise_for_status.return_value = None
+    with mock.patch("capx.integrations.tactile.univtac_api.requests.get",
+                    return_value=response):
+        data = [api.get_tactile_data() for _ in readings]
+    return data, capsys.readouterr().out
+
+
+def test_a_card_can_be_about_a_change(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "bank.yaml"
+    path.write_text(TREND_BANK, encoding="utf-8")
+    monkeypatch.setenv(recall.ENV_VAR, str(path))
+    api = _client(_Env())
+    deep = {**SEATED, "left_depth_mm": 27.0, "right_depth_mm": 27.0}
+    out_of = {**SEATED, "left_depth_mm": 28.6, "right_depth_mm": 28.6}
+    _data, out = _reads(api, [deep, out_of], capsys)
+    # The first reading has nothing to compare against, so it claims no
+    # trend and fires nothing; only the second one knows the pad moved out.
+    assert out.count("TACTILE MATCHES") == 1
+    assert "backing away" in out
+
+
+def test_a_motions_tactile_payload_becomes_the_previous_reading():
+    api = _client(_Env())
+    api._remember({"success": True, "tactile": {**SEATED, "left_depth_mm": 27.0}})
+    assert api._last_reading["left_depth_mm"] == 27.0
+
+
+def test_a_payload_without_tactile_leaves_the_previous_reading_alone():
+    api = _client(_Env())
+    api._remember({"success": True, "position": [0.4, 0.1, 0.2]})
+    assert api._last_reading is None

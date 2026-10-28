@@ -169,6 +169,26 @@ class UniVTACTactileApi(ApiBase):
         # Reference (L, R) marker displacements for delta-based slip detection.
         # None until the first detect_slip call establishes it.
         self._slip_baseline: tuple[float, float] | None = None
+        # The last tactile reading this client saw, from whatever call sent
+        # it.  Cards are retrieved by a *change* as often as by a state
+        # ("the depth stopped falling while the jaw kept closing"), and a
+        # change needs two readings.  Keeping the last one here -- rather
+        # than a history the caller has to maintain -- means the two sides
+        # of the comparison are always adjacent observations, in the same
+        # order a trace file would write them.  A reading from the previous
+        # episode is the one wrong pair this can form: /reset does not
+        # always return tactile, so the first reading of a new trial may be
+        # compared against the last reading of the old one.
+        self._last_reading: dict | None = None
+
+    def _remember(self, data: dict) -> None:
+        """Keep the most recent tactile payload for the next key's trends."""
+        tactile = data.get("tactile") if isinstance(data, dict) else None
+        if isinstance(tactile, dict):
+            self._last_reading = tactile
+            return
+        if isinstance(data, dict) and "left_contact" in data:
+            self._last_reading = data
 
     def _task_name(self) -> str:
         """The simulator's name for this task, for scoping mined cards.
@@ -296,6 +316,7 @@ class UniVTACTactileApi(ApiBase):
         tactile = data.get("tactile")
         if isinstance(tactile, dict):
             tactile_trace.record(path, tactile, body)
+        self._remember(data)
         if not data.get("success", True):
             msg = data.get("message", "Unknown motion error")
             raise RuntimeError(f"Motion failed: {msg}")
@@ -335,7 +356,9 @@ class UniVTACTactileApi(ApiBase):
                 f"Server returned HTTP {e.response.status_code} for GET {path}.\n"
                 f"Server response: {detail}"
             )
-        return r.json()
+        data = r.json()
+        self._remember(data)
+        return data
 
     # ------------------------------------------------------------------
     # Motion API
@@ -607,8 +630,11 @@ class UniVTACTactileApi(ApiBase):
 
         This is also the only call that consults the tactile memory: the
         reading is keyed, and any mined card whose situation it matches is
-        printed under the scalars.  The return shape does not change — the
-        line arrives in the output, the way every other API result does.
+        printed under the scalars.  The key compares this reading with the
+        previous one, so a card can be about a change ("the depth stopped
+        falling") and not only about a state.  The return shape does not
+        change — the line arrives in the output, the way every other API
+        result does.
 
         Every numeric field below falls back to 0.0 when its sensor did not
         report.  0.0 is out of range for all of them, so a 0.0 means the
@@ -682,6 +708,10 @@ class UniVTACTactileApi(ApiBase):
             fingertip exposes a full height map; absent from the response
             otherwise.)
         """
+        # Captured before the GET, because the GET itself becomes the new
+        # "last reading": the trends below compare this reading against the
+        # one before it, not against itself.
+        previous = self._last_reading
         data = self._get("/tactile")
         # The server computes the marker anisotropy from the same uint8 array
         # its PNG payload carries.  Derive it here only when the response has
@@ -712,7 +742,8 @@ class UniVTACTactileApi(ApiBase):
         # The library speaks only here: a card is retrieved by a reading, so
         # it has nothing to say before one has been taken.  Every call is
         # keyed, but only the matching cards cost the model any words.
-        matched = tactile_memory.match(data, task=self._task_name())
+        matched = tactile_memory.match(data, task=self._task_name(),
+                                       previous=previous)
         if matched.text:
             print(matched.text)
         # Strip images before returning to avoid huge logs

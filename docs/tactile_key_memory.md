@@ -16,7 +16,7 @@
 
 ## 键：一个读数，一组档位
 
-`capx/tactile_memory/signature.py` 把 `get_tactile_data()` 的返回压成 11 个维度，每个维度取一个档，绝不取数：
+`capx/tactile_memory/signature.py` 把 `get_tactile_data()` 的返回压成 14 个维度，每个维度取一个档，绝不取数：
 
 | 维度 | 档位 | 切点依据 |
 |---|---|---|
@@ -31,6 +31,13 @@
 | `shear_axis` | none / x / y | 某一分量是另一分量 2 倍以上才命名轴 |
 | `aniso` | unknown / iso / banded | 1.0＝均匀变形 |
 | `relief` | unknown / smooth / rough | 光滑 0.014–0.038 mm，凸点 0.09–0.25 mm |
+| `depth_trend` | unknown / falling / static / rising | 与上一次读数比，0.2 mm 以内算静止 |
+| `disp_trend` | unknown / static / growing | 位移是自 reset 累计量，所以趋势＝速率 |
+| `shear_trend` | unknown / static / growing | 同上，0.1 px 以内算没动 |
+
+后三个维度要两次读数，第一次读数一律 `unknown`——这是诚实的答案，不是缺省。存在它们是因为常驻原则第一条（"每个字段是状态不是事件"）必须能用卡片表达：最值钱的判断几乎都是**变化**（"距离还在变小"、"已经不再下沉"、"标记还在被拖"），静态档位说不出这些。两垫各自"上一次"由 API 自己记（`_remember`）：任何一次带 `tactile` 的动作回包和每一次 `get_tactile_data` 都会更新它，所以比较的两端永远是相邻的两次观察，顺序与 trace 行一致。
+
+唯一的错配风险：`/reset` 不保证回触觉，所以新 episode 的第一次读数是跟上一 episode 的最后一次比。一次而已，且只影响 `*_trend` 三个维度。
 
 两条约定写死在代码里：
 
@@ -67,9 +74,9 @@
 前提：main 上的 `CAPX_TACTILE_TRACE`（每次读数一行 JSONL）。没有 trace 就没有可挖的东西——历史日志的 `Tactile:` 行缺剪切和 anisotropy，正好是最关键的两组。
 
 1. 跑带 trace 的 trial：
-   `CAPX_TACTILE_TRACE=outputs/<model>/univtac_<task>/trial_XX python ...`
+   `CAPX_TACTILE_TRACE=outputs/<model>/univtac_<task> python ...`
 2. 分档统计：
-   `python scripts/build_tactile_bank.py --success <好跑的根> --failure <坏跑的根>`
+   `python scripts/build_tactile_bank.py --root outputs/<model>`
 3. **闸门（M0）**：如果档位分不开好跑和坏跑，卡片库帮不上忙，停在这里，不要先去调 prompt。
 4. 只把分开的档位手写进 `bank.yaml`——脚本只出报表，不出卡片。档位是传感器的事实，卡片上那句话是判断，判断不能挖，只能写。
 5. A/B：`CAPX_TACTILE_BANK=<路径>` 指向空库或满库，代码不动。

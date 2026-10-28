@@ -187,3 +187,78 @@ def test_matches_consults_only_the_dimensions_the_card_names():
 
 def test_describe_reads_as_the_condition_it_is():
     assert describe({"depth": "face", "coh_gap": "split"}) == "depth=face, coh_gap=split"
+
+
+# ---------------------------------------------------------------------------
+# Trends: the dimensions that need two readings
+# ---------------------------------------------------------------------------
+
+
+def test_a_first_reading_claims_no_trend():
+    key = key_from_readings(reading(left_contact=True, right_contact=True,
+                                    left_depth_mm=27.0, right_depth_mm=27.0))
+    assert key["depth_trend"] == "unknown"
+    assert key["disp_trend"] == "unknown"
+    assert key["shear_trend"] == "unknown"
+
+
+def test_the_pad_still_coming_in_reads_falling():
+    was = reading(left_contact=True, right_contact=True,
+                  left_depth_mm=31.0, right_depth_mm=31.0)
+    now = reading(left_contact=True, right_contact=True,
+                  left_depth_mm=27.0, right_depth_mm=27.0)
+    assert key_from_readings(now, previous=was)["depth_trend"] == "falling"
+
+
+def test_the_pad_pressed_past_the_object_reads_rising():
+    was = reading(left_contact=True, right_contact=True,
+                  left_depth_mm=26.0, right_depth_mm=26.0)
+    now = reading(left_contact=True, right_contact=True,
+                  left_depth_mm=28.4, right_depth_mm=28.4)
+    assert key_from_readings(now, previous=was)["depth_trend"] == "rising"
+
+
+def test_a_reading_that_did_not_move_is_static_not_falling():
+    # 0.1 mm apart is a re-render of the same surface, not a motion.
+    was = reading(left_contact=True, right_contact=True,
+                  left_depth_mm=27.0, right_depth_mm=27.0,
+                  left_marker_displacement_px=2.4, right_marker_displacement_px=2.4)
+    now = reading(left_contact=True, right_contact=True,
+                  left_depth_mm=27.1, right_depth_mm=27.1,
+                  left_marker_displacement_px=2.4, right_marker_displacement_px=2.4)
+    key = key_from_readings(now, previous=was)
+    assert key["depth_trend"] == "static"
+    assert key["disp_trend"] == "static"
+
+
+def test_a_pad_reporting_zero_has_no_trend_either():
+    # 0.0 is the API's "did not report", so it cannot be the "after" of a
+    # change -- banding it as "the markers stopped" would invent a fact.
+    was = reading(left_contact=True, right_contact=True,
+                  left_marker_displacement_px=2.4, right_marker_displacement_px=2.4,
+                  left_marker_shear_dx=0.4, right_marker_shear_dx=-0.4)
+    key = key_from_readings(reading(left_contact=True, right_contact=True),
+                            previous=was)
+    assert key["disp_trend"] == "unknown"
+
+
+def test_accumulating_fields_trend_as_a_rate():
+    was = reading(left_contact=True, right_contact=True,
+                  left_marker_displacement_px=1.6, right_marker_displacement_px=1.6,
+                  left_marker_shear_dx=0.05, right_marker_shear_dx=-0.05)
+    now = reading(left_contact=True, right_contact=True,
+                  left_marker_displacement_px=2.4, right_marker_displacement_px=2.4,
+                  left_marker_shear_dx=0.60, right_marker_shear_dx=-0.60)
+    key = key_from_readings(now, previous=was)
+    assert key["disp_trend"] == "growing"
+    assert key["shear_trend"] == "growing"
+
+
+def test_a_previous_reading_without_pads_does_not_break_the_trends():
+    # The pads having reported nothing last time is not a measurement of
+    # zero, so it cannot be the "before" of anything.
+    key = key_from_readings(reading(left_contact=True, right_contact=True,
+                                    left_depth_mm=27.0, right_depth_mm=27.0),
+                            previous={})
+    assert key["depth_trend"] == "unknown"
+    assert key["shear_trend"] == "unknown"

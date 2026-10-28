@@ -57,6 +57,11 @@ DIMENSIONS: tuple[str, ...] = (
     "shear_axis",  # which component of that vector dominates
     "aniso",       # marker image row/column gradient ratio
     "relief",      # fine relief of the gel's indentation map
+    # The three below need a previous reading; without one they are
+    # "unknown", which is what a first reading deserves.
+    "depth_trend",  # is the surface still coming in, or has it stopped
+    "disp_trend",   # are the markers still being dragged
+    "shear_trend",  # is the load still sliding
 )
 
 #: The legal values of each dimension.
@@ -72,6 +77,9 @@ BANDS: dict[str, tuple[str, ...]] = {
     "shear_axis": ("none", "x", "y"),
     "aniso": ("unknown", "iso", "banded"),
     "relief": ("unknown", "smooth", "rough"),
+    "depth_trend": ("unknown", "falling", "static", "rising"),
+    "disp_trend": ("unknown", "static", "growing"),
+    "shear_trend": ("unknown", "static", "growing"),
 }
 
 # Cut points, each with where the number came from.
@@ -98,6 +106,12 @@ _AXIS_RATIO = 2.0        # one component this many times the other names the axi
 
 _ANISO_BANDED = 1.15     # 1.0 is an evenly deforming gel
 _RELIEF_ROUGH = 0.05     # mm; smooth surfaces read 0.014-0.038, dotted ones 0.09-0.25
+
+# Trends compare one reading with the one before it.  The steps are set at
+# the sensor's own noise: anything below is not a movement, it is a re-render.
+_DEPTH_STEP = 0.20       # mm; repeated readings of a still surface agree this closely
+_SHEAR_STEP = 0.10       # px
+_DISP_STEP = 0.05        # px; an empty close reads under 0.01
 
 
 def _readings_value(readings: Mapping[str, Any], key: str) -> float | None:
@@ -142,7 +156,23 @@ def _gap(values: Mapping[str, float | None]) -> str:
     return "split" if abs(values["left"] - values["right"]) >= _GAP else "even"
 
 
-def key_from_readings(readings: Mapping[str, Any]) -> dict[str, str]:
+def _trend(current: float | None, previous: float | None, step: float) -> str:
+    """Rising, falling or static, with ``unknown`` when there is nothing to pair."""
+    if current is None or previous is None:
+        return "unknown"
+    change = current - previous
+    return "rising" if change >= step else "falling" if change <= -step else "static"
+
+
+def _growing(current: float | None, previous: float | None, step: float) -> str:
+    """Growing or static -- for fields that only ever accumulate."""
+    if current is None or previous is None:
+        return "unknown"
+    return "growing" if current - previous >= step else "static"
+
+
+def key_from_readings(readings: Mapping[str, Any],
+                      previous: Mapping[str, Any] | None = None) -> dict[str, str]:
     """Reduce one tactile reading to its ``dimension -> band`` key.
 
     Args:
@@ -150,6 +180,12 @@ def key_from_readings(readings: Mapping[str, Any]) -> dict[str, str]:
             primitive's ``tactile`` sub-dict.  Missing fields are allowed;
             absent or 0.0 numbers become the ``missing`` band rather than a
             suspicious zero.
+        previous: The reading taken before this one, if it is known.  Only
+            the three ``*_trend`` dimensions consult it; without it they
+            read ``unknown``, which is the honest answer for a first look.
+            Displacement and shear accumulate from the reset, so their
+            trend is a rate -- "the gel is still being dragged" -- not a
+            direction.
 
     Returns:
         dict with one entry per name in DIMENSIONS.  The values are bands
@@ -164,7 +200,8 @@ def key_from_readings(readings: Mapping[str, Any]) -> dict[str, str]:
 
     depth = _sides(readings, "depth_mm")
     present = [value for value in depth.values() if value is not None]
-    key["depth"] = _band(min(present) if present else None,
+    nearest = min(present) if present else None
+    key["depth"] = _band(nearest,
                          (_DEPTH_FLOOR, _DEPTH_PRESSED, _DEPTH_FACE, _DEPTH_FAR),
                          ("missing", "floor", "pressed", "face", "near", "far"))
 
@@ -180,7 +217,8 @@ def key_from_readings(readings: Mapping[str, Any]) -> dict[str, str]:
 
     disp = _sides(readings, "marker_displacement_px")
     present = [value for value in disp.values() if value is not None]
-    key["disp"] = _band(max(present) if present else None,
+    furthest = max(present) if present else None
+    key["disp"] = _band(furthest,
                         (_DISP_TRACE, _DISP_LIGHT, _DISP_MOVING, _DISP_HEAVY),
                         ("missing", "still", "trace", "light", "moving", "heavy"))
     key["disp_gap"] = _gap(disp)
@@ -220,6 +258,26 @@ def key_from_readings(readings: Mapping[str, Any]) -> dict[str, str]:
                for side in ("left", "right")) if value is not None]
     key["relief"] = _band(max(relief) if relief else None, (_RELIEF_ROUGH,),
                           ("unknown", "smooth", "rough"))
+
+    if previous is None:
+        key["depth_trend"] = key["disp_trend"] = key["shear_trend"] = "unknown"
+    else:
+        was = [value for value in _sides(previous, "depth_mm").values()
+               if value is not None]
+        key["depth_trend"] = _trend(nearest, min(was) if was else None, _DEPTH_STEP)
+
+        was = [value for value in _sides(previous, "marker_displacement_px").values()
+               if value is not None]
+        key["disp_trend"] = _growing(furthest, max(was) if was else None, _DISP_STEP)
+
+        before: list[float] = []
+        for side in ("left", "right"):
+            x = _readings_value(previous, f"{side}_marker_shear_dx")
+            y = _readings_value(previous, f"{side}_marker_shear_dy")
+            if x is not None and y is not None:
+                before.append((x ** 2 + y ** 2) ** 0.5)
+        key["shear_trend"] = _growing(magnitude, max(before) if before else None,
+                                      _SHEAR_STEP)
     return key
 
 

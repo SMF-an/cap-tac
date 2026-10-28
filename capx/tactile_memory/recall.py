@@ -66,7 +66,8 @@ def current_bank() -> CardBank:
 
 
 def match(readings: Mapping[str, Any], task: str = "",
-          limit: int = DEFAULT_LIMIT) -> Match:
+          limit: int = DEFAULT_LIMIT,
+          previous: Mapping[str, Any] | None = None) -> Match:
     """Key one tactile reading and select the cards it fires.
 
     Args:
@@ -75,13 +76,17 @@ def match(readings: Mapping[str, Any], task: str = "",
         task: The simulator's task name, for scoping.  Empty means only
             cross-task cards can fire.
         limit: Most cards to return; 0 returns every match.
+        previous: The last reading taken before this one, for the
+            ``*_trend`` dimensions.  None leaves them ``unknown``; the
+            caller decides what "before" means, because a reading from the
+            previous episode is not a previous reading.
 
     Returns:
         A Match.  Never raises on a reading that is missing fields -- an
         incomplete reading keys to ``missing`` bands and matches only cards
         that asked for them.
     """
-    key = signature.key_from_readings(readings)
+    key = signature.key_from_readings(readings, previous=previous)
     bank = current_bank()
     cards = bank.recall(key, task=task, limit=limit)
     return Match(key=key, cards=tuple(cards), text=bank.render(cards))
