@@ -69,7 +69,6 @@ task_lines:
       stops a few millimetres short and comes back a motion failure -- a
       placement too, because the pads still hold it over the bowl.
     - >-
-      Relief is a surface measurement only when the grip is set by
-      opening: at 0.6 of the travel both pads seat and the ball is held,
-      not squeezed. Closed to a gel-depth target instead, the pads keep
-      closing -- about 120 N a side -- and the number describes the crush.
+      On these balls relief is read with the grip set by opening at 0.6 of
+      the travel, 48 mm: that is the seat the field's numbers come from,
+      and both pads load there.
