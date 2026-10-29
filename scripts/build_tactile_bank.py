@@ -261,6 +261,12 @@ def units(root: Path) -> list[tuple[str, str, list[dict]]]:
     belongs to the trial directory it sits in.  Trials that produced no trace
     fall back to the printed lines in their summary.
 
+    A trial that left no readings at all is still a unit, with an empty list.
+    It is a labelled trial that never touched the gel, or never got far enough
+    to say so, and dropping it here would quietly flatter every base rate in
+    the report: the trials missing from this list are the ones that crashed
+    before they could fail properly.
+
     A trial number naming more than one directory -- a re-run that ended
     differently -- cannot be joined to the run-level rows: the run column
     says which rows are one attempt, not which attempt a directory is.
@@ -307,31 +313,37 @@ def units(root: Path) -> list[tuple[str, str, list[dict]]]:
         readings: list[dict] = []
         for summary in sorted(directory.rglob(SUMMARY_NAME)):
             readings += readings_from_printed(summary)
-        if readings:
-            found.append((task, outcome, readings))
+        found.append((task, outcome, readings))
     return found
 
 
-def collect(roots: list[Path]) -> tuple[dict, dict]:
+def collect(roots: list[Path]) -> tuple[dict, dict, dict]:
     """Every labelled trial under these roots, folded into band counts.
 
     Returns:
-        ``(outcomes, bands)``.  ``outcomes`` is task -> Counter of trials by
-        outcome; ``bands`` is (task, dimension, band) -> the same, counting
-        only the trials that passed through that band.
+        ``(outcomes, bands, keyless)``.  ``outcomes`` is task -> Counter of
+        trials by outcome; ``bands`` is (task, dimension, band) -> the same,
+        counting only the trials that passed through that band; ``keyless``
+        is task -> Counter of the trials that reached no band at all, because
+        no reading they took carried a depth to key.
     """
     outcomes: dict[str, Counter] = defaultdict(Counter)
     bands: dict[tuple[str, str, str], Counter] = defaultdict(Counter)
+    keyless: dict[str, Counter] = defaultdict(Counter)
     for root in roots:
         for task, outcome, readings in units(root):
             outcomes[task][outcome] += 1
-            for entry in bands_of(readings):
+            entries = bands_of(readings)
+            if not entries:
+                keyless[task][outcome] += 1
+                continue
+            for entry in entries:
                 dimension, _, band = entry.partition("=")
                 bands[(task, dimension, band)][outcome] += 1
-    return outcomes, bands
+    return outcomes, bands, keyless
 
 
-def report(outcomes: dict, bands: dict, min_support: int) -> str:
+def report(outcomes: dict, bands: dict, keyless: dict, min_support: int) -> str:
     """The band table, plus the base rates it has to be read against."""
     lines: list[str] = []
     for task in sorted(outcomes):
@@ -339,9 +351,18 @@ def report(outcomes: dict, bands: dict, min_support: int) -> str:
         total = base["success"] + base["failure"]
         if not total:
             continue
+        silent = keyless[task]["success"] + keyless[task]["failure"]
+        keyed = total - silent
         lines.append(f"\n## {task}  ({total} trials, "
                      f"{base['failure']} bad, base bad share "
                      f"{base['failure'] / total:.2f})")
+        if silent:
+            # Named, not buried: a silent trial is the most expensive kind of
+            # failure to leave out of a denominator, because it looks like a
+            # trial that was never run rather than one that never got a grip.
+            lines.append(f"{silent} of {total} trials produced no tactile key "
+                         f"(no reading carried a depth: never called the gel, "
+                         f"crashed, or stopped before contact)")
         by_dimension: dict[str, list[tuple]] = defaultdict(list)
         for (owner, dimension, band), counts in bands.items():
             if owner != task:
@@ -359,9 +380,9 @@ def report(outcomes: dict, bands: dict, min_support: int) -> str:
             # the trials, so a single band covering all of them is a channel
             # that never varied -- the normal case for a field an older
             # server never sent, and for a task that never exercised it.
-            if all(coverage == total for coverage, _b, _g, _d in rows):
-                lines.append(f"{dimension}: one band covers every trial -- "
-                             f"separates nothing here")
+            if keyed and all(coverage == keyed for coverage, _b, _g, _d in rows):
+                lines.append(f"{dimension}: one band covers every trial that "
+                             f"had a key -- separates nothing here")
                 continue
             lines.append(f"{dimension}:")
             for _coverage, band, good, bad in sorted(
@@ -384,8 +405,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.root:
         parser.error("give at least one --root")
 
-    outcomes, bands = collect([Path(root) for root in args.root])
-    text = report(outcomes, bands, args.min_support).strip() or "(no labelled trials found)"
+    outcomes, bands, keyless = collect([Path(root) for root in args.root])
+    text = (report(outcomes, bands, keyless, args.min_support).strip()
+            or "(no labelled trials found)")
     print(text)
     if args.out:
         Path(args.out).write_text(text + "\n", encoding="utf-8")

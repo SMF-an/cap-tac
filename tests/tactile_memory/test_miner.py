@@ -108,7 +108,7 @@ def test_the_outcome_comes_from_the_directory_name(miner, tmp_path):
 def test_success_and_failure_trials_are_counted_apart(miner, tmp_path):
     traced(trial(tmp_path, "blind_pick_balls", "1", number=1), GOOD, rows=3)
     traced(trial(tmp_path, "blind_pick_balls", "0", number=2), BAD, rows=2)
-    outcomes, bands = miner.collect([tmp_path])
+    outcomes, bands, _keyless = miner.collect([tmp_path])
     assert outcomes["blind_pick_balls"] == {"success": 1, "failure": 1}
     # The dead pad is the only trial with a split displacement gap.
     assert bands[("blind_pick_balls", "disp_gap", "split")] == {"failure": 1}
@@ -125,20 +125,24 @@ def test_two_runs_of_the_same_task_are_counted_separately(miner, tmp_path):
                      / f"trial_01_taskcompleted_{outcome}")
         directory.mkdir(parents=True)
         traced(directory, readings)
-    outcomes, _bands = miner.collect([tmp_path])
+    outcomes, _bands, _keyless = miner.collect([tmp_path])
     assert outcomes["lift_can"] == {"success": 1, "failure": 1}
 
 
 def test_an_unlabelled_trial_directory_is_skipped(miner, tmp_path):
     traced(trial(tmp_path, "lift_can", None), GOOD)
-    outcomes, _bands = miner.collect([tmp_path])
+    outcomes, _bands, _keyless = miner.collect([tmp_path])
     assert dict(outcomes) == {}
 
 
-def test_a_trial_with_no_readings_contributes_nothing(miner, tmp_path):
+def test_a_trial_with_no_readings_is_still_a_labelled_trial(miner, tmp_path):
+    # A crash leaves a directory and nothing else.  It is not a trial with a
+    # clean record; it is a failure that never said why, and leaving it out
+    # would flatter the base rate every band is read against.
     trial(tmp_path, "lift_can", "1")
-    outcomes, _bands = miner.collect([tmp_path])
-    assert dict(outcomes) == {}
+    outcomes, _bands, keyless = miner.collect([tmp_path])
+    assert dict(outcomes) == {"lift_can": {"success": 1}}
+    assert dict(keyless) == {"lift_can": {"success": 1}}
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +154,7 @@ def test_a_summary_fallback_carries_the_trial(miner, tmp_path):
     # No trace: the printed line is what a historical trial has left.
     directory = trial(tmp_path, "weight_classify", "1")
     summarised(directory, ["step 1: something", PRINTED])
-    outcomes, bands = miner.collect([tmp_path])
+    outcomes, bands, _keyless = miner.collect([tmp_path])
     assert outcomes["weight_classify"] == {"success": 1}
     assert bands[("weight_classify", "depth", "face")] == {"success": 1}
 
@@ -159,7 +163,7 @@ def test_a_trace_wins_over_the_summary(miner, tmp_path):
     directory = trial(tmp_path, "weight_classify", "0")
     traced(directory, BAD)
     summarised(directory, [PRINTED])
-    _outcomes, bands = miner.collect([tmp_path])
+    _outcomes, bands, _keyless = miner.collect([tmp_path])
     assert bands[("weight_classify", "disp", "heavy")] == {"failure": 1}
     assert ("weight_classify", "disp", "moving") not in bands
 
@@ -203,7 +207,7 @@ def test_a_run_trace_is_split_by_its_trial_column(miner, tmp_path):
     trial(tmp_path, "blind_pick_balls", "1", number=1)
     trial(tmp_path, "blind_pick_balls", "0", number=2)
     run_trace(run_dir, {1: (GOOD, 3), 2: (BAD, 2)})
-    outcomes, bands = miner.collect([tmp_path])
+    outcomes, bands, _keyless = miner.collect([tmp_path])
     assert outcomes["blind_pick_balls"] == {"success": 1, "failure": 1}
     assert bands[("blind_pick_balls", "disp_gap", "split")] == {"failure": 1}
     assert bands[("blind_pick_balls", "disp_gap", "even")] == {"success": 1}
@@ -214,7 +218,7 @@ def test_a_row_from_a_trial_with_no_directory_is_not_counted(miner, tmp_path):
     # unknown; guessing one would put a made-up label behind a band.
     run_dir = trial(tmp_path, "blind_pick_balls", "1", number=1).parent
     run_trace(run_dir, {1: (GOOD, 2), 9: (BAD, 2)})
-    outcomes, bands = miner.collect([tmp_path])
+    outcomes, bands, _keyless = miner.collect([tmp_path])
     assert outcomes["blind_pick_balls"] == {"success": 1}
     assert ("blind_pick_balls", "disp_gap", "split") not in bands
 
@@ -224,7 +228,7 @@ def test_a_trial_in_the_run_trace_is_not_counted_twice_from_its_summary(
     directory = trial(tmp_path, "blind_pick_balls", "1", number=1)
     run_trace(directory.parent, {1: (GOOD, 2)})
     summarised(directory, [PRINTED])
-    outcomes, _bands = miner.collect([tmp_path])
+    outcomes, _bands, _keyless = miner.collect([tmp_path])
     assert outcomes["blind_pick_balls"] == {"success": 1}
 
 
@@ -240,7 +244,7 @@ def test_a_rerun_appending_to_the_same_file_is_a_second_trial(miner, tmp_path):
                               "readings": readings})] * 2
     (directory.parent / "tactile_trace.jsonl").write_text(
         "\n".join(lines) + "\n", encoding="utf-8")
-    outcomes, bands = miner.collect([tmp_path])
+    outcomes, bands, _keyless = miner.collect([tmp_path])
     assert outcomes["blind_pick_balls"] == {"failure": 2}
     assert bands[("blind_pick_balls", "disp_gap", "even")] == {"failure": 1}
     assert bands[("blind_pick_balls", "disp_gap", "split")] == {"failure": 1}
@@ -257,7 +261,7 @@ def test_rows_naming_two_directories_are_dropped_for_their_summaries(
     run_trace(failed.parent, {8: (BAD, 2)})
     summarised(failed, [PRINTED])
     summarised(passed, [PRINTED])
-    outcomes, bands = miner.collect([tmp_path])
+    outcomes, bands, _keyless = miner.collect([tmp_path])
     assert outcomes["blind_pick_balls"] == {"success": 1, "failure": 1}
     assert ("blind_pick_balls", "disp", "heavy") not in bands
 
@@ -265,7 +269,7 @@ def test_rows_naming_two_directories_are_dropped_for_their_summaries(
 def test_two_directories_for_one_number_are_two_trials(miner, tmp_path):
     summarised(trial(tmp_path, "lift_can", "0", number=3), [PRINTED])
     summarised(trial(tmp_path, "lift_can", "1", number=3), [PRINTED])
-    outcomes, _bands = miner.collect([tmp_path])
+    outcomes, _bands, _keyless = miner.collect([tmp_path])
     assert outcomes["lift_can"] == {"success": 1, "failure": 1}
 
 
@@ -309,7 +313,18 @@ def test_a_dimension_that_never_varies_is_not_ranked(miner, tmp_path, capsys):
     traced(trial(tmp_path, "lift_can", "0", number=2), BAD)
     miner.main(["--root", str(tmp_path), "--min-support", "1"])
     out = capsys.readouterr().out
-    assert "shear: one band covers every trial" in out
+    assert "shear: one band covers every trial that had a key" in out
+
+
+def test_a_silent_trial_is_named_in_the_report(miner, tmp_path, capsys):
+    # The number has to be visible next to the base rate, because a silent
+    # trial is a failure that looks like a trial nobody ran.
+    traced(trial(tmp_path, "lift_can", "1", number=1), GOOD)
+    trial(tmp_path, "lift_can", "0", number=2)
+    miner.main(["--root", str(tmp_path), "--min-support", "1"])
+    out = capsys.readouterr().out
+    assert "## lift_can  (2 trials, 1 bad, base bad share 0.50)" in out
+    assert "1 of 2 trials produced no tactile key" in out
 
 
 def test_no_roots_is_a_usage_error(miner):
