@@ -84,8 +84,10 @@ task_lines:
       A close can drag one pad's whole marker field along with the jaw, and
       that pad then reports the drag: its displacement is several times the
       other's -- 49 px against 8.7 -- and it never comes back during the
-      episode. Two pads that disagree that way are not a grasp. Close again;
-      the same approach and depth usually recovers.
+      episode. Two pads that disagree that way are not a grasp, and closing
+      again in the same place does not mend it: five closes in a row
+      reproduced it exactly. A healthy pair reads within about a third of
+      each other.
     - >-
       The calibration belongs to the close. Asked for 27.2 mm, the difference
       reads newtons at about one for one -- 0.98 N per px, linear to 0.23 N
