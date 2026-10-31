@@ -80,6 +80,13 @@ task_lines:
       readings do not move at all: the tab is dragged along the pads rather
       than pushed into them.
     - >-
+      That difference is the load only while both pads are reading the tab.
+      A close can drag one pad's whole marker field along with the jaw, and
+      that pad then reports the drag: its displacement is several times the
+      other's -- 49 px against 8.7 -- and it never comes back during the
+      episode. Two pads that disagree that way are not a grasp. Close again;
+      the same approach and depth usually recovers.
+    - >-
       The calibration belongs to the close. Asked for 27.2 mm, the difference
       reads newtons at about one for one -- 0.98 N per px, linear to 0.23 N
       from 0 to 22 N -- and its zero is whatever the pads had made of the gel
