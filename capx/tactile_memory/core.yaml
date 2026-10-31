@@ -81,9 +81,13 @@ task_lines:
       than pushed into them.
     - >-
       At this task's grip the difference is newtons at about one for one:
-      1.03 N per px, less 1.8 N of offset, linear to 0.05 N from 4 N to 19 N
-      -- a tenth of the half-newton band the holds are scored on. It is a
-      calibration of this tab between these pads, not a law.
+      1.03 N per px, linear to 0.05 N from 4 N to 19 N -- a tenth of the
+      half-newton band the holds are scored on. Where zero sits is neither a
+      constant nor small: the strap's own close, 27.6 mm asked for explicitly,
+      left 1.5 px of difference on the resting strap and the default close
+      left 3.3, which is 1.9 N. So the zero is read off the close, where the
+      fixture still holds the strap and the load is nothing, and the load is
+      measured from that reading.
     - >-
       The marker difference climbs a little while a load is held even though
       the load does not: the tab settles between the pads, about a quarter of
