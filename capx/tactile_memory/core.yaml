@@ -85,8 +85,10 @@ task_lines:
       -- a tenth of the half-newton band the holds are scored on. It is a
       calibration of this tab between these pads, not a law.
     - >-
-      The marker difference keeps climbing while a load is held even though
-      the load does not: the tab creeps on between the pads, about 0.4 N of
-      reading per three seconds, while the physical load is flat to a tenth
-      of a newton over the same window. A hold that corrects on the reading
-      therefore pulls the hand away from a load that was already right.
+      The marker difference climbs a little while a load is held even though
+      the load does not: the tab settles between the pads, about a quarter of
+      a newton of reading over the three seconds of a hold, while the load
+      itself stays flat to a tenth of one. It is a settling and not a clock --
+      it does not accumulate across stages, and subtracting a rate from the
+      reading by elapsed time lands the next stage most of a newton high. The
+      load is what the reading says at the height the hand is at.
