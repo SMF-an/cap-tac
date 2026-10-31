@@ -20,12 +20,23 @@ schema: tactile_keys.v1
 #       field was dragged with the jaw and its numbers describe the drag.
 #     why: Optional provenance for a human. Not delivered.
 #     evidence: [blind_pick_balls/seed_3/trial_12]
-#     status: observed               # or hypothesis
+#     status: observed               # or hypothesis; delivered with the line
+#     support:                       # optional; for a human, not delivered
+#       n: 12                        # independent episodes, or null
+#       conditions: [fixed 48 mm opening, adaptive=false]
+#       counterexamples: [blind_pick_balls/seed_8/trial_3]
+#       source: build_tactile_bank --root outputs/gpt-6-astra 2026-10-30
 #
 # `when` must name at least one dimension from
 # capx.tactile_memory.signature.BANDS.  `do` is what the model reads when
 # the card fires, so it is written action-first and stays under 240 chars.
 # A card may not name check_success, a reward or a ground-truth field: the
 # line has to survive being handed to a task with no ground truth at all.
+#
+# `when` says when the card applies; `support` says how firmly the line was
+# established.  They are different questions and support never gates
+# retrieval: a card with counterexamples still fires, and the contradiction
+# is visible in its audit block.  A support block without a `source` is
+# refused -- a count nobody can re-check is worse than no count.
 
 cards: []

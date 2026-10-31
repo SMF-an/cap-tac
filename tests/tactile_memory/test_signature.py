@@ -16,6 +16,7 @@ from capx.tactile_memory.signature import (
     BANDS,
     DIMENSIONS,
     describe,
+    is_absence,
     key_from_readings,
     matches,
 )
@@ -262,3 +263,26 @@ def test_a_previous_reading_without_pads_does_not_break_the_trends():
                             previous={})
     assert key["depth_trend"] == "unknown"
     assert key["shear_trend"] == "unknown"
+
+
+def test_an_absent_reading_is_not_a_band_a_card_can_be_gated_on():
+    # "this reading does not exist" is a fact about the record, not a
+    # condition an action follows from.  Depth 0.0 is the API's fallback for
+    # "this pad did not report", not a measurement.
+    key = key_from_readings(reading(left_depth_mm=0.0, right_depth_mm=0.0))
+    assert key["depth"] == "missing"
+    assert is_absence("depth", key["depth"])
+    assert is_absence("disp", key["disp"])
+    assert is_absence("disp_gap", key["disp_gap"])
+    assert is_absence("depth_trend", key["depth_trend"])
+
+
+def test_no_shear_and_no_pad_in_range_are_readings_not_absences():
+    key = key_from_readings(reading())
+    assert key["contact"] == "none" and key["shear"] == "none"
+    assert not is_absence("contact", key["contact"])
+    assert not is_absence("shear", key["shear"])
+    assert not is_absence("shear_axis", key["shear_axis"])
+    # A value that was measured is never an absence, however extreme.
+    assert not is_absence("depth", "far")
+    assert not is_absence("disp", "still")

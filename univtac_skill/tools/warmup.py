@@ -21,12 +21,38 @@ magic numbers.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 # Module-level ``import robo`` (NOT ``from robo import ...``): robo imports
 # tools._config, which pulls this module in while robo is still initializing;
 # binding the names here would fail on the partial module.  Access the
 # attributes at call time instead (robo is fully loaded by then).
 import robo
 from ._config import load_config, task_name, server_url, save_memory
+
+
+def _probe_support(task: str, step_down_m: float | None,
+                   max_contact_steps: int | None) -> dict:
+    """The evidence behind one warmup measurement: n=1 and its conditions.
+
+    A warmup number is one observation, not a distribution.  Recording it as
+    ``n=1`` together with the parameters that produced it stops a later
+    reader from treating ``depth_at_first_contact_mm`` as a task constant
+    when it is one probe at one step size.  ``step_down_m`` is None for an
+    initial hold, where no probe ran.
+    """
+    if step_down_m is None:
+        conditions = ["initial state, no probe"]
+    else:
+        conditions = [f"step_down {step_down_m * 1000:.1f} mm",
+                      f"max_contact_steps {max_contact_steps}"]
+    return {
+        "n": 1,
+        "conditions": conditions,
+        "counterexamples": [],
+        "source": f"warmup {task} {datetime.now().isoformat(timespec='seconds')}",
+    }
+
 
 
 def run_warmup(
@@ -128,6 +154,7 @@ def run_warmup(
                 f"gripper already grasps the target (depth ~{bl:.1f} mm); "
                 f"insertion hardens contact toward the ~20 mm jam level"
             ),
+            "support": _probe_support(task, None, None),
         }
         if save:
             p = save_memory(record, task)
@@ -180,6 +207,7 @@ def run_warmup(
         "depth_at_first_contact_mm": first_contact,
         "pattern": "depth_mm decreases from ~34 (far plane) as contact hardens; "
                    "~27 mm light grasp",
+        "support": _probe_support(task, step_down_m, max_contact_steps),
     }
 
     # --- save ---

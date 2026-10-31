@@ -82,6 +82,29 @@ BANDS: dict[str, tuple[str, ...]] = {
     "shear_trend": ("unknown", "static", "growing"),
 }
 
+
+def is_absence(dimension: str, band: str) -> bool:
+    """Whether a band reports an absent reading rather than a measured one.
+
+    ``depth=missing`` and every ``*_trend=unknown`` say that the sensor, or
+    the previous reading a trend needs, was not there.  That is a fact about
+    what could be measured -- a record's validity -- not a condition an
+    action can be gated on: nothing follows from "this measurement does not
+    exist".  ``contact=none``, ``shear=none`` and ``shear_axis=none`` are not
+    absences; zero shear and no pad in range are readings in their own right.
+
+    Args:
+        dimension: A name from :data:`DIMENSIONS`.
+        band: One of that dimension's legal values.
+
+    Returns:
+        True when the band names the absence of a reading.
+    """
+    names = BANDS.get(dimension)
+    if not names or dimension in ("contact", "shear", "shear_axis"):
+        return False
+    return band == names[0]
+
 # Cut points, each with where the number came from.
 _DEPTH_FAR = 33.5        # 34.0 is the far plane: nothing in the sensor's range
 _DEPTH_FACE = 29.6       # the undeformed gel face sits at ~28.3; above this, no touch

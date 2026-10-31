@@ -20,6 +20,14 @@ reserved for cards whose evidence line names trials that were actually run.
 Both are delivered -- a hypothesis that says so is still cheaper than
 rediscovering the situation from scratch -- but the status travels with the
 text so the model can weigh it.
+
+Applicability and validity are stored apart.  ``when`` is applicability: it
+says which reading the line is about, and a matching band makes the card
+fire.  :class:`Support` is validity: how many independent episodes the line
+was checked against, under which acquisition conditions, and what
+contradicted it.  Validity never gates applicability -- a card contradicted
+once still fires, and says so in its audit block.  Making evidence a filter
+would hide exactly the disagreement the reader needs to see.
 """
 
 from __future__ import annotations
@@ -52,6 +60,99 @@ class CardError(ValueError):
 
 
 @dataclass(frozen=True)
+class Support:
+    """How firmly a card's line was established, as counts and conditions.
+
+    A support block answers a different question from ``Card.when``.
+    ``when`` is applicability -- does this reading belong to the situation
+    the card describes -- and a match makes the card fire.  Support is
+    validity -- how often the line below held when the situation occurred,
+    under which acquisition conditions, and where it failed.  The two are
+    kept apart on purpose: evidence that gated retrieval would silence a
+    card the moment an episode disagreed with it, when the disagreement is
+    the fact the operator needs to see.
+
+    Nothing here is delivered to the model.  It is the record a human reads
+    when deciding whether to keep, narrow, promote or retire the line; the
+    delivered text carries only ``status``.
+
+    Attributes:
+        n: Independent episodes the line was checked against.  A trial, or
+            one bounded contact, counts once; repeated readings inside one
+            contact are not independent and would make a claim look better
+            supported than it is.  None means no count was made, which is
+            not the same as 0.
+        conditions: The acquisition conditions the count was taken under, as
+            short phrases (``fixed 48 mm opening``, ``adaptive=False``).
+            Empty means the source did not say, and a reader should treat
+            the interval as unknown rather than universal.
+        counterexamples: Episodes where the line did not hold, as ids.  An
+            empty list beside ``n`` says none were found, not that none
+            were looked for.
+        source: Where the count came from -- a report, a run tree, a date.
+            Required whenever a support block is present: a count with no
+            origin cannot be re-checked, and a number nobody can re-check
+            is worse than no number.
+    """
+
+    n: int | None = None
+    conditions: tuple[str, ...] = ()
+    counterexamples: tuple[str, ...] = ()
+    source: str = ""
+
+    def render(self) -> str:
+        """One audit line for a human reader."""
+        parts = ["n=?" if self.n is None else f"n={self.n}"]
+        if self.counterexamples:
+            parts.append("contradicted by " + ", ".join(self.counterexamples))
+        else:
+            parts.append("no counterexamples")
+        if self.conditions:
+            parts.append("under " + "; ".join(self.conditions))
+        parts.append("from " + self.source)
+        return ", ".join(parts)
+
+
+def _strings(raw, label: str) -> tuple[str, ...]:
+    """A list of non-empty strings, or a CardError naming where it failed."""
+    if raw is None:
+        return ()
+    if isinstance(raw, (str, Mapping)) or not isinstance(raw, Iterable):
+        raise CardError(f"{label} must be a list")
+    values = tuple(str(item).strip() for item in raw)
+    if any(not value for value in values):
+        raise CardError(f"{label} must not contain empty entries")
+    return values
+
+
+def _support_from(raw, where: str, identifier: str) -> Support | None:
+    """Validate one ``support`` block."""
+    if raw is None:
+        return None
+    label = f"{where}/{identifier}"
+    if not isinstance(raw, Mapping):
+        raise CardError(f"{label}: 'support' must be a mapping")
+    unknown = set(raw) - {"n", "conditions", "counterexamples", "source"}
+    if unknown:
+        raise CardError(f"{label}: unknown support fields {sorted(unknown)}")
+    n = raw.get("n")
+    if n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 0):
+        raise CardError(f"{label}: support 'n' must be a non-negative integer "
+                        f"or null")
+    conditions = _strings(raw.get("conditions"), f"{label}: support 'conditions'")
+    counterexamples = _strings(raw.get("counterexamples"),
+                               f"{label}: support 'counterexamples'")
+    source = raw.get("source")
+    if not isinstance(source, str) or not source.strip():
+        raise CardError(f"{label}: support needs a non-empty 'source'")
+    if n is not None and len(counterexamples) > n:
+        raise CardError(f"{label}: {len(counterexamples)} counterexamples "
+                        f"cannot come from n={n} episodes")
+    return Support(n=n, conditions=conditions,
+                   counterexamples=counterexamples, source=source.strip())
+
+
+@dataclass(frozen=True)
 class Card:
     """One tactile situation and the line that belongs with it.
 
@@ -66,7 +167,9 @@ class Card:
         why: Optional provenance prose for a human reader.  Not delivered.
         evidence: Where the pattern was seen -- trial ids or run names.
         status: ``observed`` when an outcome was measured, ``hypothesis``
-            when the pattern was only seen.
+            when the pattern was only seen.  Delivered with the line.
+        support: The count, conditions and counterexamples behind the line,
+            for a human reader.  Not delivered; see :class:`Support`.
     """
 
     id: str
@@ -76,6 +179,7 @@ class Card:
     why: str = ""
     evidence: tuple[str, ...] = field(default_factory=tuple)
     status: str = "hypothesis"
+    support: Support | None = None
 
     @property
     def specificity(self) -> int:
@@ -83,14 +187,27 @@ class Card:
         return len(self.when)
 
     def render(self) -> str:
-        """One line for the model: what to do, and the shape that fired it."""
-        return f"- {self.do} ({signature.describe(self.when)})"
+        """One line for the model: what to do, the shape that fired it, and
+        how firmly it was established."""
+        return f"- {self.do} ({signature.describe(self.when)}; {self.status})"
+
+    def provenance(self) -> str:
+        """The audit block for a human: why, evidence, and support."""
+        parts = []
+        if self.why:
+            parts.append(self.why)
+        if self.evidence:
+            parts.append("evidence: " + ", ".join(self.evidence))
+        if self.support is not None:
+            parts.append("support: " + self.support.render())
+        return "\n".join(parts)
 
 
 def _card_from(raw: Mapping, where: str) -> Card:
     if not isinstance(raw, Mapping):
         raise CardError(f"{where}: a card must be a mapping")
-    known = {"id", "when", "do", "tasks", "why", "evidence", "status"}
+    known = {"id", "when", "do", "tasks", "why", "evidence", "status",
+             "support"}
     unknown = set(raw) - known
     if unknown:
         raise CardError(f"{where}: unknown card fields {sorted(unknown)}")
@@ -134,12 +251,19 @@ def _card_from(raw: Mapping, where: str) -> Card:
     if status not in STATUSES:
         raise CardError(f"{where}/{identifier}: status {status!r} is not one of {STATUSES}")
 
-    blob = " ".join((identifier, do, why)).lower()
+    support = _support_from(raw.get("support"), where, identifier)
+
+    blob = " ".join((identifier, do, why, status)).lower()
     if any(marker in blob for marker in _FORBIDDEN):
         raise CardError(f"{where}/{identifier}: names the answer sheet")
+    if support is not None:
+        audit = " ".join(support.conditions + support.counterexamples
+                         + (support.source,)).lower()
+        if any(marker in audit for marker in _FORBIDDEN):
+            raise CardError(f"{where}/{identifier}: names the answer sheet")
 
     return Card(id=identifier, when=conditions, do=do, tasks=tasks,
-                why=why, evidence=evidence, status=status)
+                why=why, evidence=evidence, status=status, support=support)
 
 
 @dataclass(frozen=True)

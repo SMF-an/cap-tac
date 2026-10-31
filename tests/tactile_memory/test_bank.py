@@ -98,8 +98,122 @@ def test_render_is_one_line_per_card_and_names_the_condition(tmp_path):
     bank = load_bank(write(tmp_path, card_yaml(ANY_MOVING)))
     text = bank.render(bank.recall(seated_key(), task=""))
     assert text.startswith("TACTILE MATCHES")
-    assert "(disp=moving)" in text
+    assert "(disp=moving; hypothesis)" in text
     assert text.count("\n") == 1
+
+
+def test_status_travels_with_the_line_so_the_model_can_weigh_it(tmp_path):
+    # The module's promise: both statuses are delivered, and the text says
+    # which one it is.  A hypothesis that does not say so would be acted on
+    # as if it had been measured.
+    bank = load_bank(write(tmp_path, card_yaml(DEAD_PAD, ANY_MOVING)))
+    key = dict(seated_key(), disp_gap="split", coh_gap="split")
+    text = bank.render(bank.recall(key, task="blind_pick_balls"))
+    assert "(disp_gap=split, coh_gap=split; observed)" in text
+    assert "(disp=moving; hypothesis)" in text
+
+
+# ---------------------------------------------------------------------------
+# Support: validity, kept apart from applicability
+# ---------------------------------------------------------------------------
+
+SUPPORTED = """\
+  - id: dead-pad-after-close
+    tasks: [blind_pick_balls]
+    when: {disp_gap: split}
+    do: Read the pad that is still coherent.
+    evidence: [blind_pick_balls/seed_3/trial_12]
+    status: observed
+    support:
+      n: 12
+      conditions: [fixed 48 mm opening, adaptive=false]
+      counterexamples: [blind_pick_balls/seed_8/trial_3]
+      source: build_tactile_bank --root outputs/gpt-6-astra 2026-10-30
+"""
+
+
+def test_a_support_block_is_parsed_and_stays_off_the_delivered_line(tmp_path):
+    bank = load_bank(write(tmp_path, card_yaml(SUPPORTED)))
+    card = bank.cards[0]
+    assert card.support is not None
+    assert card.support.n == 12
+    assert card.support.conditions == ("fixed 48 mm opening", "adaptive=false")
+    assert card.support.counterexamples == (
+        "blind_pick_balls/seed_8/trial_3",)
+    assert "n=12" not in card.render()
+    assert "n=12" in card.provenance()
+
+
+def test_counterexamples_do_not_stop_the_card_firing(tmp_path):
+    # Validity is not applicability.  A card that was contradicted once is
+    # exactly the card a reader needs to see fire and contradict itself,
+    # not one that quietly disappears from retrieval.
+    bank = load_bank(write(tmp_path, card_yaml(SUPPORTED)))
+    cards = bank.recall(dict(seated_key(), disp_gap="split"),
+                        task="blind_pick_balls")
+    assert [card.id for card in cards] == ["dead-pad-after-close"]
+
+
+def test_an_uncounted_support_block_is_allowed(tmp_path):
+    # n=null is an honest state: the conditions are known, the count is not.
+    # Loading it is still useful, because the conditions are the part a
+    # reader needs to decide whether the interval transfers.
+    bank = load_bank(write(tmp_path, card_yaml("""\
+  - id: partly-counted
+    when: {depth: face}
+    do: x
+    support:
+      conditions: [one probe]
+      source: warmup 2026-10-30
+""")))
+    assert bank.cards[0].support is not None
+    assert bank.cards[0].support.n is None
+
+
+@pytest.mark.parametrize("body,message", [
+    # A count nobody can re-check is worse than no count.
+    ("""\
+  - id: no-source
+    when: {depth: face}
+    do: x
+    support: {n: 4}
+""", "source"),
+    ("""\
+  - id: bad-n
+    when: {depth: face}
+    do: x
+    support: {n: -1, source: somewhere}
+""", "non-negative integer"),
+    ("""\
+  - id: float-n
+    when: {depth: face}
+    do: x
+    support: {n: 2.5, source: somewhere}
+""", "non-negative integer"),
+    ("""\
+  - id: too-many-counterexamples
+    when: {depth: face}
+    do: x
+    support: {n: 1, counterexamples: [a, b], source: somewhere}
+""", "cannot come from"),
+    ("""\
+  - id: unknown-support-field
+    when: {depth: face}
+    do: x
+    support: {n: 1, source: somewhere, spread: 0.3}
+""", "unknown support fields"),
+    ("""\
+  - id: answer-sheet-source
+    when: {depth: face}
+    do: x
+    support: {n: 1, source: check_success logs}
+""", "answer sheet"),
+])
+def test_a_support_block_that_could_not_be_audited_fails_at_load(
+        tmp_path, body, message):
+    with pytest.raises(CardError, match=message):
+        load_bank(write(tmp_path, card_yaml(body)))
+
 
 
 @pytest.mark.parametrize("body,message", [
