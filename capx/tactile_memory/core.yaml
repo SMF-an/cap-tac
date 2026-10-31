@@ -80,14 +80,21 @@ task_lines:
       readings do not move at all: the tab is dragged along the pads rather
       than pushed into them.
     - >-
-      At this task's grip the difference is newtons at about one for one:
-      1.03 N per px, linear to 0.05 N from 4 N to 19 N -- a tenth of the
-      half-newton band the holds are scored on. Where zero sits is neither a
-      constant nor small: the strap's own close, 27.6 mm asked for explicitly,
-      left 1.5 px of difference on the resting strap and the default close
-      left 3.3, which is 1.9 N. So the zero is read off the close, where the
-      fixture still holds the strap and the load is nothing, and the load is
-      measured from that reading.
+      The calibration belongs to the close. Asked for 27.2 mm, the difference
+      reads newtons at about one for one -- 0.98 N per px, linear to 0.23 N
+      from 0 to 22 N -- and its zero is whatever the pads had made of the gel
+      at that moment, 4.6 px of difference on the resting strap. Read the zero
+      off the close, where the fixture still holds the strap and the load is
+      nothing, and measure every later load from it: it is not a constant, and
+      a shallower close moves it by more than a newton.
+    - >-
+      Close firmly, and check the strap followed. The task frees it only when
+      both pads pass 27.7 mm during the close, and a 27.6 mm close has landed
+      at 27.80 and left it pinned. A pinned strap buys almost no tension when
+      pulled -- 4.9 N after 12 mm where a free one gives 22 -- while the tab
+      slides through the gel and reads as a large load that is not there. If
+      the first centimetre of pull buys far less than the strap should, it is
+      the fixture and not the strap.
     - >-
       The marker difference climbs by itself while the hand holds still: a
       large part of a newton of reading over the three seconds of a hold,
