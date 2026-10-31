@@ -15,37 +15,33 @@ schema: tactile_core.v1
 principles:
   - id: no-single-reading
     text: >-
-      Every field here is a state, not an event. One reading says where the
-      gel is; only the difference between two readings says what changed, and
-      a difference taken across an unrecorded command is not a difference.
+      One reading says where the gel is, not what changed; only the difference
+      between two does, and only across a recorded command.
   - id: one-channel-one-question
     text: >-
-      Each field answers exactly one question -- depth how hard, marker
-      displacement how far the gel moved, coherence whether it moved together,
-      shear which way it was dragged, relief what shape the surface is. Asking
-      a field a question it does not answer still returns a confident number.
+      Each field answers one question -- depth how hard, displacement how far
+      the gel moved, coherence whether it moved together, shear which way it
+      was dragged, relief what shape the surface is. Ask one a question it
+      does not answer and it still answers.
   - id: zero-means-missing
     text: >-
-      0.0 is the fallback for a pad that did not report, and it sits at the
-      wrong end of every scale: a dead pad reads like the firmest grip. The
-      contact flag is what says whether a pad is talking. The shear vector is
+      0.0 is the fallback for a pad that did not report, and it reads like the
+      firmest grip; the contact flag says whether a pad is talking. Shear is
       the one field where 0.0 is also an honest reading.
   - id: tactile-cannot-locate
     text: >-
-      The gel knows whether something touched it and what that touch was
-      like; it never knows where the object is. Position comes from the arm's
-      own state, and a grasp centred by tactile feedback is a guess with extra
-      steps.
+      The gel knows what a touch was like, never where the object is; position
+      comes from the arm's own state, and a grasp centred on the gel is a
+      guess with extra steps.
   - id: readable-is-not-identity
     text: >-
-      A reading is a function of the command that produced it as much as of
-      the object: the same object read at a different grip width, depth or
-      pose is a different number. Only readings taken the same way compare.
+      A reading is a function of the command as much as of the object -- the
+      same object at a different width, depth or pose is a different number.
+      Only readings taken the same way compare.
   - id: the-object-is-the-sensor
     text: >-
-      The gel measures by deforming what it touches as much as itself. Past a
-      certain squeeze the reading describes the crush, not the surface, and a
-      measurement that damaged what it measured cannot be repeated.
+      The gel deforms what it touches as much as itself: past a certain
+      squeeze the reading describes the crush, not the surface.
 
 # Facts that are true on one task and unrecoverable if missed. These stay
 # resident because the cost of missing them is a whole run, while the cost
@@ -74,33 +70,22 @@ task_lines:
       and both pads load there.
   tension_strap:
     - >-
-      The strap's load is in the pads' marker shear and not in their depth.
-      Pulled, the two pads' shear runs opposite ways -- the pads are mounted
-      mirrored -- and the difference between them is the load, while the depth
-      readings do not move at all: the tab is dragged along the pads rather
-      than pushed into them.
+      The strap's load is the difference of the two pads' marker shear -- they
+      are mounted mirrored, so a pull runs them opposite ways -- and not their
+      depth, which does not move at all.
     - >-
-      Close by opening, not by depth. close_gripper(position=0.22) lands the
-      pads at 25.70 and 25.25 mm every time -- three closes in a row, to a
-      hundredth of a millimetre -- where the same depth command lands
-      somewhere new each time: 27.31/26.99, 27.39/27.10, 27.70/27.38,
-      27.80/27.32. One of those dragged a pad's whole marker field off its
-      lattice and never let go. The opening frees the strap as well.
+      Close by opening, not by depth: close_gripper(position=0.22) lands the
+      pads at 25.70 and 25.25 mm every time and frees the strap, where the
+      depth close lands somewhere new on every run and once dragged a pad's
+      marker field off its lattice for the rest of the episode.
     - >-
-      At that grip the load is 0.93 N per px of the difference, measured from
-      the close reading, above the first 4.5 px: the first two millimetres of
-      pull take up slack and carry nothing, so a pull that buys no reading has
-      not failed. Five points from 3.2 to 18.0 N sit on that line to within
-      0.2 N. Two pads more than about a third apart in marker displacement
-      are not a grasp at all, and closing again does not mend one: five
-      closes in a row reproduced a 5.6x ratio exactly.
+      That grip reads 0.93 N per px of the difference from the close, above
+      the first 4.5 px: the first two millimetres take up slack and carry
+      nothing, so a pull that buys no reading has not failed. Two pads more
+      than a third apart in displacement are not a grasp, and closing again
+      does not mend one.
     - >-
-      The marker difference climbs by itself while the hand holds still: a
-      large part of a newton of reading over the three seconds of a hold,
-      more than the band, on a load that is flat to a tenth of one. It is a
-      settling, not a clock -- it does not accumulate across stages, so a rate
-      subtracted by elapsed time lands the next stage high. The consequence is
-      the other way round too: the hold is held by the clock and the height,
-      and a gauge re-read during it will show the target walking away with
-      nothing having moved. Backing off from that reading gives up a load that
-      was right.
+      The reading climbs by itself while the hand holds still -- most of the
+      band over a hold's three seconds, on a load that is flat. Do not
+      subtract it by elapsed time and do not watch it during the hold: hold
+      the height and the clock.
