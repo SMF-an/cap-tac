@@ -72,3 +72,15 @@ task_lines:
       On these balls relief is read with the grip set by opening at 0.6 of
       the travel, 48 mm: that is the seat the field's numbers come from,
       and both pads load there.
+  tension_strap:
+    - >-
+      The strap's load is in the pads' marker shear and not in their depth.
+      Pulled, the two pads' shear runs opposite ways -- the pads are mounted
+      mirrored -- and the difference between them is the load, while the depth
+      readings do not move at all: the tab is dragged along the pads rather
+      than pushed into them.
+    - >-
+      The marker difference keeps climbing while a load is held even though
+      the load does not: the tab creeps on between the pads. A hold that
+      corrects on the reading therefore pulls the hand away from a load that
+      was already right.

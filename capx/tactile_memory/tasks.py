@@ -31,6 +31,7 @@ TASK_TYPES: dict[str, str] = {
     "tactile_transfer_rearrange_clean": "manipulate",
     "bulb_tightening": "screw",
     "wipe_vase": "wipe",
+    "tension_strap": "force",
 }
 
 #: Tasks of each type.
