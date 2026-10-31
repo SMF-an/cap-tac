@@ -34,6 +34,8 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--port", type=int, default=8120)
     ap.add_argument("--close-depth", type=float, default=CLOSE_DEPTH_MM)
+    ap.add_argument("--close-position", type=float, default=None,
+                    help="close by finger opening (0-1) instead of by depth")
     ap.add_argument("--pulls", type=int, default=6)
     ap.add_argument("--step-mm", type=float, default=2.0)
     ap.add_argument("--require-release", action="store_true", default=True,
@@ -67,9 +69,17 @@ def main() -> int:
     post("/move", {"position": [grasp[0], grasp[1], grasp[2] + 0.05],
                    "quaternion_wxyz": quat, "tag": "above"})
     post("/move", {"position": grasp, "quaternion_wxyz": quat, "tag": "at_tab"})
+    if args.close_position is None:
+        close_body = {"action": "close", "force_threshold": args.close_depth,
+                      "use_adaptive_grasp": True}
+    else:
+        # A position close commands the finger separation, so the squeeze is
+        # whatever the tab's width makes it rather than wherever a depth servo
+        # happened to stop.
+        close_body = {"action": "close", "position": args.close_position,
+                      "use_adaptive_grasp": False}
     try:
-        post("/gripper", {"action": "close", "force_threshold": args.close_depth,
-                          "use_adaptive_grasp": True})
+        post("/gripper", close_body)
     except RuntimeError as exc:
         print("close raised:", exc)
 
