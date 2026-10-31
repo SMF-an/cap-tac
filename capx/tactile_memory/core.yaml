@@ -89,10 +89,12 @@ task_lines:
       fixture still holds the strap and the load is nothing, and the load is
       measured from that reading.
     - >-
-      The marker difference climbs a little while a load is held even though
-      the load does not: the tab settles between the pads, about a quarter of
-      a newton of reading over the three seconds of a hold, while the load
-      itself stays flat to a tenth of one. It is a settling and not a clock --
-      it does not accumulate across stages, and subtracting a rate from the
-      reading by elapsed time lands the next stage most of a newton high. The
-      load is what the reading says at the height the hand is at.
+      The marker difference climbs by itself while the hand holds still: a
+      large part of a newton of reading over the three seconds of a hold,
+      more than the band, on a load that is flat to a tenth of one. It is a
+      settling, not a clock -- it does not accumulate across stages, so a rate
+      subtracted by elapsed time lands the next stage high. The consequence is
+      the other way round too: the hold is held by the clock and the height,
+      and a gauge re-read during it will show the target walking away with
+      nothing having moved. Backing off from that reading gives up a load that
+      was right.
