@@ -80,7 +80,13 @@ task_lines:
       readings do not move at all: the tab is dragged along the pads rather
       than pushed into them.
     - >-
+      At this task's grip the difference is newtons at about one for one:
+      1.03 N per px, less 1.8 N of offset, linear to 0.05 N from 4 N to 19 N
+      -- a tenth of the half-newton band the holds are scored on. It is a
+      calibration of this tab between these pads, not a law.
+    - >-
       The marker difference keeps climbing while a load is held even though
-      the load does not: the tab creeps on between the pads. A hold that
-      corrects on the reading therefore pulls the hand away from a load that
-      was already right.
+      the load does not: the tab creeps on between the pads, about 0.4 N of
+      reading per three seconds, while the physical load is flat to a tenth
+      of a newton over the same window. A hold that corrects on the reading
+      therefore pulls the hand away from a load that was already right.
