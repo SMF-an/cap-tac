@@ -80,9 +80,10 @@ task_lines:
       marker field off its lattice for the rest of the episode.
     - >-
       That grip reads 0.93 N per px of the difference from the close, above
-      the first 4.3 px -- the take-up runs 4.1 to 4.5 px from strap to strap,
-      and the first two millimetres of pull carry nothing, so a pull that buys
-      no reading has not failed. Measure from the close and keep climbing: the
+      the first 4.1 px -- the take-up runs 4.1 to 4.5 px from strap to strap
+      and reads a little low on both straps measured -- and the first two
+      millimetres of pull carry nothing, so a pull that buys no reading has
+      not failed. Measure from the close and keep climbing: the
       field does not retrace its path, so descending and taking a fresh zero
       re-zeroes against a state that is not the close -- 0.9 px on a run that
       did, and its second stage landed most of a newton high. Two pads more
