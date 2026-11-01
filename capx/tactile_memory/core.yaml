@@ -80,10 +80,10 @@ task_lines:
       marker field off its lattice for the rest of the episode.
     - >-
       That grip reads 0.93 N per px of the difference from the close, above
-      the first 4.5 px: the first two millimetres take up slack and carry
-      nothing, so a pull that buys no reading has not failed. Two pads more
-      than a third apart in displacement are not a grasp, and closing again
-      does not mend one.
+      the first 4.3 px -- the take-up runs 4.1 to 4.5 px from strap to strap,
+      and the first two millimetres of pull carry nothing, so a pull that buys
+      no reading has not failed. Two pads more than a third apart in
+      displacement are not a grasp, and closing again does not mend one.
     - >-
       The reading climbs by itself while the hand holds still -- most of the
       band over a hold's three seconds, on a load that is flat. Do not
