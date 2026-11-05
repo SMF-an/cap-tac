@@ -284,6 +284,25 @@ def hold(moves):
     return tension_n(state["reply"])
 
 
+# --- 3. Where zero sits, from the gel's own gain ------------------------------
+# Two rises give pixels of slip per millimetre of hand rise; the strap's slack
+# is 2.3 mm of that rise, so the take-up in pixels is the product and the
+# offset is what is left when the line is asked for zero there.  It is
+# measured here, not carried in, because it follows the strap the seed drew:
+# 4.74 px on a soft strap against 3.73 on a firm one, a whole band apart.
+if held:
+    first = slip_px(go(grasp_z + PROBE_M))
+    second = slip_px(go(grasp_z + 2 * PROBE_M))
+    if first is None or second is None or second <= first:
+        print("the gel did not see the two probing rises; carrying no take-up")
+    else:
+        gain = (second - first) / PROBE_M
+        take_up = SLACK_M * gain
+        state["offset"] = -GEL_N_PER_PX * take_up
+        print("gel gain %.0f px/m, take-up %.2f px, offset %+.2f N"
+              % (gain, take_up, state["offset"]))
+
+
 if not held:
     print("ABORT: the pads did not reach the tab; a pull here measures nothing")
 else:
