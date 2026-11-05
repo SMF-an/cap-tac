@@ -177,16 +177,20 @@ def tension_n(reply):
     return None if slip is None else GEL_N_PER_PX * slip + state["offset"]
 
 
-# --- 1. The hand's own orientation (the only thing worth sampling here) ------
-# sample_grasp_pose's first call returns the hand's own pose.  The strap's own
-# pose is the base of a body that deforms, not a point to hang a grasp off, so
-# what this is for is the quaternion.
-_, q0 = sample_grasp_pose(STRAP)
-
-tab = (STRAP_BASE[0], STRAP_BASE[1], STRAP_BASE[2] + TAB_LOCAL_Z)
-grasp_z = tab[2] + GRIPPER_OFFSET_M
-xy = (tab[0], tab[1])
-print("tab at %s, flange target z %.4f" % (tab, grasp_z))
+# --- 1. Where to grasp --------------------------------------------------------
+# The task's own grasp pose: the server builds it from the strap's base plus the
+# tab's height, which is the same point the expert takes, and it is the pose the
+# calibration was measured at.  Building it by hand instead -- the tab's height
+# above the base, plus the flange offset -- misses it by four or five
+# millimetres, and on an opening close that is the difference between pads at
+# 25.70/25.25 mm and pads at 25.60/24.94, where the gel reads a different gain
+# and, on 2026-11-05, a negative slope: the gauge said 3 N at a pose carrying
+# more than eleven, and the pull went on until the strap tore.
+grasp, q0 = sample_grasp_pose(STRAP)
+grasp = (float(grasp[0]), float(grasp[1]), float(grasp[2]))
+xy = (grasp[0], grasp[1])
+grasp_z = grasp[2]
+print("grasp pose %s" % (grasp,))
 
 # --- 2. Take the tab ----------------------------------------------------------
 goto_pose((xy[0], xy[1], grasp_z), q0, z_approach=APPROACH_CLEAR_M)
