@@ -27,7 +27,7 @@ OBJECT = "elastic_strap"
 # The close that reproduces: position=0.22 lands the pads at 25.70/25.25 mm on
 # every strap tried, where a depth close lands somewhere new each time.
 CLOSE_OPENING = 0.22
-STEPS_MM = (2.0, 4.0, 6.0, 8.0, 10.0, 12.0)
+STEPS_MM = (2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0)
 
 
 def main() -> int:
@@ -35,6 +35,9 @@ def main() -> int:
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--port", type=int, default=8120)
     ap.add_argument("--opening", type=float, default=CLOSE_OPENING)
+    ap.add_argument("--hold-at-mm", type=float, default=None,
+                    help="stop the ramp here and hold, to see what a hold does")
+    ap.add_argument("--hold-seconds", type=float, default=2.5)
     args = ap.parse_args()
     base = f"http://127.0.0.1:{args.port}"
 
@@ -92,7 +95,31 @@ def main() -> int:
         truth = tension()
         px.append(d)
         n.append(truth)
-        print("  +%4.1f mm  |d|=%6.2f px  truth=%7.3f N" % (step, d, truth))
+        print("  +%4.1f mm  |d|=%6.2f px  truth=%7.3f N  dispL=%5.1f dispR=%5.1f coh=%.2f/%.2f"
+              % (step, d, truth, t["left_marker_displacement_px"],
+                 t["right_marker_displacement_px"],
+                 t["left_marker_coherence"], t["right_marker_coherence"]))
+        if args.hold_at_mm is not None and abs(step - args.hold_at_mm) < 1e-6:
+            # The same hold the task's own stages need, with nothing to do but
+            # sit there: the hand re-asks for the pose it already holds, which
+            # is the only thing that advances the simulation.
+            start_step = int(post("/move", {"position": [grasp[0], grasp[1], z],
+                                            "quaternion_wxyz": quat,
+                                            "tag": "hold"})["step"])
+            calls = 0
+            while True:
+                reply = post("/move", {"position": [grasp[0], grasp[1], z],
+                                       "quaternion_wxyz": quat, "tag": "hold"})
+                calls += 1
+                if int(reply["step"]) - start_step >= 120 * args.hold_seconds:
+                    break
+            t = get("/tactile")
+            dx = t["left_marker_shear_dx"] - t["right_marker_shear_dx"]
+            dy = t["left_marker_shear_dy"] - t["right_marker_shear_dy"]
+            d = math.hypot(dx - zero[0], dy - zero[1])
+            after = tension()
+            print("  --- held %.1f s (%d calls, +%d ticks): |d|=%6.2f px  truth=%7.3f N"
+                  % (args.hold_seconds, calls, int(reply["step"]) - start_step, d, after))
         if truth > 20.0:
             # The task ruptures the strap past its overload, and a ruptured
             # strap needs a new server process; stop with the points we have.
