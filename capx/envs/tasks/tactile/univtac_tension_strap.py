@@ -243,13 +243,13 @@ def raise_to(target):
         if step_index >= 3 and est - start < 0.5:
             print("the strap is not following the hand -- it never left its fixture")
             return None
-        if state["slope"] and state["slope"] > 0.0:
-            delta = (target - COARSE_STOP_MARGIN_N - est) / state["slope"]
-            delta = min(max(delta, 0.0002), 0.005)
-        else:
-            delta = COARSE_M
-        # Never downwards, for the reason the correction loop gives below.
-        delta = max(delta, 0.0)
+        # One size of step, and the size the calibration was measured at.
+        # Sizing a jump from the stiffness -- up to 5 mm -- comes out short of
+        # the same pose reached in 2 mm steps: on 2026-11-05 a stage that
+        # jumped read 15.62 px where the 2 mm ramp reads 16.50, and landed
+        # 0.9 N light.  The gel does not answer a fast pull the way it answers
+        # a slow one.
+        delta = COARSE_M
         est_next = tension_n(go(state["z"] + delta))
         if est_next is None:
             return None
