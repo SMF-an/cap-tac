@@ -48,6 +48,18 @@ The slack itself is the same on every strap measured (2.27-2.32 mm); only
 the gain moves. Carrying a fixed take-up instead costs up to 0.7 N and loses
 two seeds out of four.
 
+**Take the steps the numbers were measured at.** The same pose does not read
+the same when it is reached a different way: a 5 mm jump comes out 0.9 px
+short of the pose a 2 mm ramp reaches, and the half-millimetre corrections
+that finish a stage cost another 0.6 px -- 0.6 N on a band of 1.0. Climb in
+2 mm steps, and let the small steps be as few as possible.
+
+What does *not* bend is magnitude. A 2 mm ramp stays straight from zero to
+20.7 N with a 0.09 N residual over seven points, and both pads'
+displacements and coherence are flat across it (74.5 to 77.3 px, 0.52 to
+0.57 on one). The channel has the range; what it does not have is patience
+for being moved around in it.
+
 Measure from the close and keep climbing. The field does not retrace its
 path: a descent and a fresh zero re-zeroes against a state that is not the
 close — 0.90 px on a 2026-11-01 run, 0.85 N, and its second stage landed at

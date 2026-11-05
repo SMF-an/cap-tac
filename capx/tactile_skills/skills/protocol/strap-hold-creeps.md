@@ -2,12 +2,12 @@
 id: R15
 name: strap-hold-creeps
 family: protocol
-summary: A held strap reads most of a band higher over three seconds without loading more — hold the height and the clock, not the reading.
+summary: A held strap's reading drifts by most of a band over the hold while the load stays flat — hold the height and the clock, not the reading.
 task_types: []
 tasks: [tension_strap]
 channels: [shear]
 objects: the elastic strap
-evidence: Standing still at 12.7 N through eight no-op moves (330 physics ticks), the task's physical tension fell 0.05 N while the marker difference climbed 0.47 px. Re-zeroing the estimate at the end of the first hold put the second stage at 18.06 N on the gel and 17.65 N physically, both inside the half-newton band. The drift also does not carry. On a later run the first hold climbed 0.26 px over its 369 ticks, and the next stage's load then matched the static gel line with no offset at all — a rate subtracted from the reading by elapsed time put that stage 0.8 N high, measured two ways (the hand sat 3.2 mm above the held height, +6.8 N at 2.12 N/mm, and the gel read 18.8 N against a band topping out at 18.5).
+evidence: Standing still at 11.9 N for 2.5 s, 328 physics ticks, the marker difference fell 0.45 px and the tension 0.07 N — the drift runs either way and it is not the load. What it also does is come back — the points after that hold landed on the same line the hold-free ramp drew, 19.30, 22.52 and 25.65 px at 12, 14 and 16 mm against 19.54, 22.56 and 25.67, and the two fits agree at 0.949 and 0.950 N per px with 0.16 and 0.09 N of residual. So the drift recovers by itself, which is the opposite of correcting for it — a rate subtracted by elapsed time put one stage 0.8 N high, and re-anchoring on the dipped reading bakes the dip in.
 ---
 
 ## How
@@ -19,9 +19,9 @@ again and again. About ten such calls is the three seconds a stage needs.
 Hold the height, not the reading. The load a held strap carries does not
 change on its own, so there is nothing for a hold-time loop to correct.
 
-Before the next stage, re-zero the estimate where the load is known — the
-stage just held — so the creep accumulated during the hold does not become a
-bias in the next target.
+Do not re-zero after the hold. The drift it leaves behind recovers on its
+own; measuring the next stage against the dipped reading instead bakes the
+dip in as an offset, and on this band an offset is a pass or a fail.
 
 ## Traps
 
