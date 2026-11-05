@@ -2,7 +2,7 @@
 id: S24
 name: wide-pads-see-nothing
 family: sense
-summary: A 60 mm ball between fully open pads clears each gel by 10 mm and reads 34.00 like free air — but only within ~10 mm of the axis; further out it lies under the pads, and a descent there stops on it.
+summary: Fully open pads clear a 60 mm ball by 10 mm and read 34.00 like free air — so 34.00 means nothing between them only within ~10 mm of the axis.
 task_types: []
 tasks: [blind_pick_balls]
 channels: [depth]

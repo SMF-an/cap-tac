@@ -2,7 +2,7 @@
 id: A13
 name: seat-by-slide-collapse
 family: act
-summary: A bottomed part takes none of the block — the seat is the slide going negative, past a tenth of that block's descent in mm, and only once your twists have sunk the hand 5.5 mm, on a feed that matches the thread, and on a reading at coherence 0.70 — fed over it, every block clears that tenth. Once it reads, no wrist resets — press on until the API reports seated.
+summary: Seated is the slide going negative past a tenth of that block's descent, on a hand that has sunk 5.5 mm, a feed matching the thread and coherence 0.70; then stop re-setting.
 task_types: [screw]
 channels: [shear, coincidence]
 objects: light_bulb

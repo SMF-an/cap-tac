@@ -2,7 +2,7 @@
 id: A10
 name: thread-direction-by-legs
 family: act
-summary: Two legs, one each way, 30° at about 6 mm a turn, each read on its outbound turn; the higher signed slide tightens — that leg barely slid, so it reads low coherence; take it anyway. Closer than 0.15 mm, widen once to 45°; a pad a lattice off its baseline is lost — re-grasp, re-run.
+summary: Run two 30° legs at ~6 mm a turn, one each way, read outbound — the higher signed slide tightens, even at low coherence.
 task_types: [screw]
 channels: [shear]
 objects: light_bulb

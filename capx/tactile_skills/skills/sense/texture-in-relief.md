@@ -2,7 +2,7 @@
 id: S23
 name: texture-in-relief
 family: sense
-summary: Measure at a fixed 48 mm seat — close_gripper(position=0.6, adaptive=False) stops on a ball and raises; that raise is a ball, not an empty station, and the pads read anyway. At that seat smooth stays under 0.05 mm and dotted runs 0.09-0.25, the bar 0.06; the pads disagree and the larger sits on the ball's surface. Dotted reads that high only while the pads are on its centre — 17-21 mm off they bite its edge and the better pad reads 0.07-0.08, a missed seat, not a smooth ball.
+summary: Seat at close_gripper(position=0.6, adaptive=False) — the raise is a ball, not an empty station — and read relief — smooth under 0.05 mm, dotted 0.09-0.25, the bar 0.06.
 task_types: []
 tasks: [blind_pick_balls]
 channels: [relief, depth]

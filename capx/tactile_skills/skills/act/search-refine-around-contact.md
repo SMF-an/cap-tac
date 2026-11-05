@@ -2,7 +2,7 @@
 id: A23
 name: search-refine-around-contact
 family: act
-summary: A returned close that did not grip is still a touch — the pads shoved the block ~11-15 mm along the sweep. Do not probe its neighbours, which sit behind it; jump ~40 mm along the sweep and close again. Sweep west to east on a lattice with about 35 mm between sites; a 14 mm grid only spends the simulated-time budget.
+summary: A returned close that did not grip still shoved the block ~11-15 mm — skip its neighbours and close again ~40 mm along the sweep, on a ~35 mm lattice.
 task_types: []
 tasks: [blind_pick]
 channels: [depth, displacement]

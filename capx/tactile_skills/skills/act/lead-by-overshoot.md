@@ -2,7 +2,7 @@
 id: A11
 name: lead-by-overshoot
 family: act
-summary: Over-feed one 15° block at 11 mm a turn, read the lead as feed + slide × 360/15 — both in mm, not a search, and that block only. A result at or above the feed, or under 4 mm a turn, is wreckage — never clamp it; re-grasp, do not retry shorter.
+summary: Read the lead from one 15° block over-fed at 11 mm a turn — lead = feed + slide × 360/15, both in mm; at or above the feed, or under 4 mm, is wreckage — re-grasp.
 task_types: [screw]
 channels: [shear]
 objects: light_bulb

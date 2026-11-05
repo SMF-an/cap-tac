@@ -2,7 +2,7 @@
 id: A22
 name: search-close-default
 family: act
-summary: Close every search site with the default adaptive close in try/except; a raise means no pad got under ~28.5 (empty sites end on the 34.00 far plane), so move on; a return means a pad pressed something (under ~28.5), a touch even at ~0 px. Skip a return with one pad on the far plane. A grip needs either pad's displacement to rise by over ~1 px; at ~0 px it is a graze that shoves the block ~15 mm, and the servo raises on it. A hold reads both pads in 26.3-27.5; one pad pinned at the 24 mm floor with the other at 26-27 and displacements tens of times apart is a finger on the block's top face, and it comes out on the first lift. Deepen to force_threshold=26.5 only when a gripped site still reads above ~27.5 on either pad. Open once per miss, in the cleanup.
+summary: Close every search site with the default adaptive close — a raise is an empty site, a return is a touch, and a touch is a grip only if a pad's displacement rises over ~1 px.
 task_types: []
 tasks: [blind_pick]
 channels: [depth, coincidence]
