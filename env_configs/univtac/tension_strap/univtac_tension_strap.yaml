@@ -89,6 +89,6 @@ output_dir: ./outputs/univtac_tension_strap
 # still serving seed 0.  At a nonzero seed, trials == resume_idx is exactly one
 # trial.  Move both numbers together AND restart the server on the same seed
 # for each round.
-trials: 2
-resume_idx: 2
+trials: 3
+resume_idx: 3
 num_workers: 1  # Isaac Sim is not parallel-safe

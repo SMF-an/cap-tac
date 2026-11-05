@@ -61,6 +61,12 @@ APPROACH_CLEAR_M = 0.05
 # marker field: an empty close moves the markers a few thousandths of a pixel
 # and a real grasp moves them several.
 GRASP_DEPTH_MM = 27.6
+# A depth close lands somewhere new on every run -- 27.31/26.99, 27.39/27.10,
+# 27.70/27.38, 27.80/27.32 for one command -- and the calibration belongs to
+# where it lands.  A close asked for an OPENING lands the pads at 25.70/25.25
+# every time instead, on four straps running, so the opening is what this
+# oracle asks for.
+CLOSE_OPENING = 0.22
 CONTACT_PX = 1.0
 
 # --- The two stages -----------------------------------------------------------
@@ -77,15 +83,22 @@ TARGETS_N = __TARGETS__
 # both the same way (a change of squeeze, a drift of the whole hand) cancels
 # in the difference.
 #
-# Measured on seed 0 by raising the hand in 2 mm steps from the release point
-# to 19.3 N: the difference is a straight line in tension at 1.031 N per px
-# with -1.77 N of intercept, r^2 0.99992, residual 0.05 N -- a tenth of the
-# half-newton band this task is scored on.  The same run's depth readings do
-# not move at all (the tab is dragged along the pads, not pushed into them),
-# and the mean marker displacement is only half as linear because the right
-# pad's own displacement saturates near 9.3 px.
-GEL_N_PER_PX = 1.031
-GEL_OFFSET_N = -1.77
+# Measured on four seeds by raising the hand in 2 mm steps from the release
+# point: the difference is a straight line in tension at 0.93 N per px on all
+# four (0.928, 0.932, 0.936, 0.947 -- 2% apart), residual 0.1 N, a fifth of
+# the half-newton band this task is scored on.  The depth readings do not move
+# at all (the tab is dragged along the pads, not pushed into them).
+GEL_N_PER_PX = 0.93
+
+# What is NOT constant across seeds is where zero sits.  That offset is the
+# gel's own gain -- pixels of slip per millimetre the hand rises -- times the
+# slack in the strap, and the gain follows the modulus the seed draws: 2.09
+# px/mm on a 0.35 MPa strap against 1.62 on a 0.26 one, which is a pixel of
+# take-up and most of a newton.  The slack itself does not move: 2.27, 2.28,
+# 2.32 and 2.31 mm on those four straps.  So the slack is written down here in
+# millimetres and the gain is measured from two rises, never carried in.
+SLACK_M = 0.0023
+PROBE_M = 0.002
 
 # --- How the hand moves -------------------------------------------------------
 # A 2 mm rise is about 4 N on this strap, far too coarse to land inside
@@ -138,19 +151,30 @@ def taken(reply):
     return float(left) > CONTACT_PX and float(right) > CONTACT_PX
 
 
-def slip_px(reply):
-    \"\"\"The signed slip of the tab between the pads, in marker pixels.\"\"\"
-    left = reply.get("left_marker_shear_dx")
-    right = reply.get("right_marker_shear_dx")
-    if left is None or right is None:
+def shear(reply):
+    \"\"\"The difference of the two pads' shear vectors, in marker pixels.\"\"\"
+    keys = ("left_marker_shear_dx", "left_marker_shear_dy",
+            "right_marker_shear_dx", "right_marker_shear_dy")
+    values = [reply.get(k) for k in keys]
+    if any(value is None for value in values):
         return None
-    return float(left) - float(right)
+    return (float(values[0]) - float(values[2]),
+            float(values[1]) - float(values[3]))
 
 
-def tension_n(reply, offset=GEL_OFFSET_N):
+def slip_px(reply):
+    \"\"\"How far the tab has slipped since the close, in marker pixels.\"\"\"
+    vector = shear(reply)
+    zero = state.get("zero")
+    if vector is None or zero is None:
+        return None
+    return math.hypot(vector[0] - zero[0], vector[1] - zero[1])
+
+
+def tension_n(reply):
     \"\"\"The strap's load as the gel measures it, in newtons.\"\"\"
     slip = slip_px(reply)
-    return None if slip is None else GEL_N_PER_PX * slip + offset
+    return None if slip is None else GEL_N_PER_PX * slip + state["offset"]
 
 
 # --- 1. The hand's own orientation (the only thing worth sampling here) ------
@@ -167,7 +191,7 @@ print("tab at %s, flange target z %.4f" % (tab, grasp_z))
 # --- 2. Take the tab ----------------------------------------------------------
 goto_pose((xy[0], xy[1], grasp_z), q0, z_approach=APPROACH_CLEAR_M)
 try:
-    reply = close_gripper(force_threshold=GRASP_DEPTH_MM, adaptive=True)
+    reply = close_gripper(position=CLOSE_OPENING)
 except Exception as error:
     # A close that stopped short still leaves the fingers where the tab
     # stopped them, and the reading that comes back with the error describes
@@ -181,7 +205,8 @@ print("grip depths %s, tab taken: %s" % (pads(reply), held))
 # One dict rather than four globals: every helper below writes the hand's
 # height, the stiffness it has measured and the last gel reply, and a plain
 # module-level assignment inside a function would shadow instead of update it.
-state = {"z": grasp_z, "slope": None, "reply": reply, "offset": GEL_OFFSET_N}
+state = {"z": grasp_z, "slope": None, "reply": reply, "offset": 0.0,
+         "zero": shear(reply)}
 
 
 def go(z):
@@ -200,7 +225,7 @@ def raise_to(target):
     then re-fit that stiffness from their own jumps, so a strap that stiffens
     as it stretches is followed instead of fought.
     \"\"\"
-    start = tension_n(state["reply"], state["offset"])
+    start = tension_n(state["reply"])
     est = start
     if est is None:
         return None
@@ -219,7 +244,7 @@ def raise_to(target):
             delta = min(max(delta, 0.0002), 0.005)
         else:
             delta = COARSE_M
-        est_next = tension_n(go(state["z"] + delta), state["offset"])
+        est_next = tension_n(go(state["z"] + delta))
         if est_next is None:
             return None
         state["slope"] = (est_next - est) / delta
@@ -230,7 +255,7 @@ def raise_to(target):
             break
         slope = state["slope"] if state["slope"] else 2000.0
         delta = min(max(error / slope, -CORRECTION_CAP_M), CORRECTION_CAP_M)
-        est_next = tension_n(go(state["z"] + delta), state["offset"])
+        est_next = tension_n(go(state["z"] + delta))
         if est_next is None:
             return None
         if abs(delta) > 1e-6:
@@ -243,7 +268,7 @@ def hold(moves):
     \"\"\"Spend `moves` motion calls at the height the hand already holds.\"\"\"
     for _ in range(moves):
         go(state["z"])
-    return tension_n(state["reply"], state["offset"])
+    return tension_n(state["reply"])
 
 
 def reanchor(at_target):
@@ -261,6 +286,23 @@ def reanchor(at_target):
         state["offset"] = at_target - GEL_N_PER_PX * slip
 
 
+# --- 3. Where zero sits, from the gel's own gain ------------------------------
+# Two rises give pixels of slip per millimetre of hand rise; the strap's slack
+# is 2.3 mm of that rise, so the take-up in pixels is the product and the
+# offset is what is left when the line is asked for zero there.  It is
+# measured here, not carried in, because it follows the strap the seed drew.
+if held:
+    first = slip_px(go(grasp_z + PROBE_M))
+    second = slip_px(go(grasp_z + 2 * PROBE_M))
+    if first is None or second is None or second <= first:
+        print("the gel did not see the two probing rises; carrying no take-up")
+    else:
+        gain = (second - first) / PROBE_M
+        take_up = SLACK_M * gain
+        state["offset"] = -GEL_N_PER_PX * take_up
+        print("gel gain %.0f px/m, take-up %.2f px, offset %+.2f N"
+              % (gain, take_up, state["offset"]))
+
 if not held:
     print("ABORT: the pads did not reach the tab; a pull here measures nothing")
 else:
@@ -272,7 +314,7 @@ else:
         print("stage %d: %.2f N at z %.4f (slope %.0f N/m)"
               % (index + 1, landed, state["z"], state["slope"] or 0.0))
         hold(HOLD_MOVES[index])
-        held_n = tension_n(state["reply"], state["offset"])
+        held_n = tension_n(state["reply"])
         print("stage %d held; reading now %.2f N"
               % (index + 1, -99.0 if held_n is None else held_n))
         reanchor(target)
