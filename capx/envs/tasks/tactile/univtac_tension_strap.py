@@ -25,10 +25,11 @@ change is that the load passes through the fingers: the pads carry it, and the
 gel is therefore the only thing here that can say how hard the strap is being
 pulled.
 
-The strap is elastic, so the load is set by where the hand is and by nothing
-else - the pull raises it and backing off lowers it by as much. There is no
-second lever and nothing to press against, and nothing is scored on arriving:
-the score is the two holds.
+The strap is elastic, so the load is set by how high the hand holds it and by
+nothing else: raising the hand loads the strap, and lowering it gives back as
+much. Nothing else moves that number - there is no second lever and nothing
+to press against, and sideways or downward motion only loses what the lift
+bought. Nothing is scored on arriving: the score is the two holds.
 
 Write ONLY executable Python code (no code fences). Import numpy if needed.
 """
