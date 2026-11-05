@@ -110,7 +110,7 @@ PROBE_M = 0.002
 COARSE_M = 0.002
 COARSE_STOP_MARGIN_N = 2.5
 MAX_CORRECTIONS = 6
-CORRECTION_CAP_M = 0.004
+CORRECTION_CAP_M = 0.0005
 SETTLE_N = 0.15
 
 # --- The hold -----------------------------------------------------------------
@@ -248,6 +248,8 @@ def raise_to(target):
             delta = min(max(delta, 0.0002), 0.005)
         else:
             delta = COARSE_M
+        # Never downwards, for the reason the correction loop gives below.
+        delta = max(delta, 0.0)
         est_next = tension_n(go(state["z"] + delta))
         if est_next is None:
             return None
@@ -258,7 +260,14 @@ def raise_to(target):
         if abs(error) <= SETTLE_N:
             break
         slope = state["slope"] if state["slope"] else 2000.0
-        delta = min(max(error / slope, -CORRECTION_CAP_M), CORRECTION_CAP_M)
+        # Only ever upwards.  The gel's field does not retrace its path: a
+        # correction that goes back down and up again comes out short -- on
+        # 2026-11-05 an episode that was free to swing four millimetres read
+        # 20.88 px at a pose where a monotone ramp reads 22.52, and the stage
+        # it landed carried 1.6 N more than its gauge said.  So overshooting a
+        # stage is not corrected by going down; it is prevented by taking the
+        # steps small.
+        delta = min(max(error / slope, 0.0), CORRECTION_CAP_M)
         est_next = tension_n(go(state["z"] + delta))
         if est_next is None:
             return None
@@ -275,38 +284,6 @@ def hold(moves):
     return tension_n(state["reply"])
 
 
-def reanchor(at_target):
-    \"\"\"Re-zero the gel reading at a load it is safe to call known.
-
-    The tab creeps between the pads while the strap is loaded even though the
-    load itself does not change, so the marker difference keeps climbing at a
-    fixed rate and any estimate built on an absolute line drifts with it.  At
-    the end of a hold the load is the one just held -- that is what the hold
-    was -- so the offset is moved to make the reading say so, and the next
-    stage starts from a zero that the creep has not walked away from.
-    \"\"\"
-    slip = slip_px(state["reply"])
-    if slip is not None:
-        state["offset"] = at_target - GEL_N_PER_PX * slip
-
-
-# --- 3. Where zero sits, from the gel's own gain ------------------------------
-# Two rises give pixels of slip per millimetre of hand rise; the strap's slack
-# is 2.3 mm of that rise, so the take-up in pixels is the product and the
-# offset is what is left when the line is asked for zero there.  It is
-# measured here, not carried in, because it follows the strap the seed drew.
-if held:
-    first = slip_px(go(grasp_z + PROBE_M))
-    second = slip_px(go(grasp_z + 2 * PROBE_M))
-    if first is None or second is None or second <= first:
-        print("the gel did not see the two probing rises; carrying no take-up")
-    else:
-        gain = (second - first) / PROBE_M
-        take_up = SLACK_M * gain
-        state["offset"] = -GEL_N_PER_PX * take_up
-        print("gel gain %.0f px/m, take-up %.2f px, offset %+.2f N"
-              % (gain, take_up, state["offset"]))
-
 if not held:
     print("ABORT: the pads did not reach the tab; a pull here measures nothing")
 else:
@@ -321,7 +298,6 @@ else:
         held_n = tension_n(state["reply"])
         print("stage %d held; reading now %.2f N"
               % (index + 1, -99.0 if held_n is None else held_n))
-        reanchor(target)
     print("episode finished; the harness scores it")
 """
 
