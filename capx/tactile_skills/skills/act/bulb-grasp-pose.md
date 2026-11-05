@@ -23,7 +23,7 @@ Approach straight down onto the pose as returned.
 
 - **Ask again after the bulb has been released and caught again.** The pose is
   rebuilt per call; a pose kept from before a re-grasp is the one that goes
-  stale ([[regrasp-after-slip]]).
+  stale.
 - **Do not construct the quaternion yourself.** The wrist orientation comes
   back as the task's own approach has it; a built top-down quaternion puts the
   GelSight wrist near a singularity and makes the planner refuse.

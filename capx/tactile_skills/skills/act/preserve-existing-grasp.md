@@ -12,16 +12,12 @@ evidence: On the screw task each re-grasp is also a released part and a thread t
 ## How
 
 Re-grasp only when something says the grasp has failed — a verification reading
-that says so ([[grasp-verification]]), a slip, or a task step the current grasp
+that says so, a slip, or a task step the current grasp
 cannot reach. Otherwise carry on with what is already held.
 
-A grip can also fail as an *instrument* while passing every contact check: both
-flags up, depths normal, and one pad's marker field sitting a lattice off its
-no-load baseline, which is a pad that cannot answer any reading you take from
-it. That is a failure reading too — the difference the task needs cannot be
-measured on it — and it is remade, not preserved. Note the direction it does
-not cover: a low coherence on its own is what a close looks like and is not a
-failure ([[confidence-gate]]).
+A grip can also fail as an *instrument*: the pads can be on the object and still
+describe it uselessly, which is a failed reading to be re-made, not a grasp to
+be preserved.
 
 ## Traps
 

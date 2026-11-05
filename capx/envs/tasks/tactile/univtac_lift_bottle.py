@@ -13,7 +13,7 @@ Write ONLY executable Python code (no code fences). Import numpy if needed.
 ORACLE_CODE = """
 import numpy as np
 
-close_gripper()
+close_gripper(position=0.45)
 rotate_gripper("bottle", 1.22, steps=4)
 open_gripper()
 """

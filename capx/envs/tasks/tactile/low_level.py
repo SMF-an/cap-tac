@@ -121,6 +121,25 @@ class UniVTACStubEnv(BaseEnv):
         """Return whether the last server check indicated success."""
         return self._last_success
 
+    def physics_step(self) -> int | None:
+        """Physics ticks since the episode reset, from the server's clock.
+
+        The motion and tactile replies already carry this counter, but the
+        generated code usually drops it; the trial harness reads it once here
+        so each summary keeps a per-trial step count next to its wall time.
+        When the live query cannot answer — a wall-clock alarm can leave a
+        motion running on the server's main thread — fall back to the last
+        count the API recorded from a reply.  That is slightly short of the
+        final tick (the abandoned op's own steps are not in it), but it is the
+        difference between a missing line and a usable one.
+        """
+        try:
+            r = requests.get(f"{self._server}/tactile", timeout=10)
+            r.raise_for_status()
+            return int(r.json().get("step", 0))
+        except Exception:
+            return getattr(self, "_last_api_step", None)
+
     @property
     def dt(self) -> float:
         return 0.01

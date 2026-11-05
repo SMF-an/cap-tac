@@ -17,7 +17,15 @@ stretches for a given force is a property of the strap, and it is different
 every episode, so a plan made of distances cannot be this task. What does not
 change is that the load passes through the fingers: the pads carry it, and the
 gel is therefore the only thing here that can say how hard the strap is being
-pulled.
+pulled.  Read it with describe_tactile(); the description is the only tactile
+reading this task gives you.
+
+The gel's report is words, not a number: it describes how hard, firm or tight
+the contact feels, and it will not give you the tension in newtons.  Do not
+wait for a numeric reading.  Pull in small steps and read after each step;
+what is comparable is one reading against another at the same grip — the
+unloaded grip first, then each pull — so steer by the change in the
+description and by the direction each further step moves it.
 
 The strap is elastic, so the load is set by where the hand is and by nothing
 else - the pull raises it and backing off lowers it by as much. There is no
@@ -159,7 +167,7 @@ print("tab at %s, flange target z %.4f" % (tab, grasp_z))
 # --- 2. Take the tab ----------------------------------------------------------
 goto_pose((xy[0], xy[1], grasp_z), q0, z_approach=APPROACH_CLEAR_M)
 try:
-    reply = close_gripper(force_threshold=GRASP_DEPTH_MM, adaptive=True)
+    reply = close_gripper(position=0.22)
 except Exception as error:
     # A close that stopped short still leaves the fingers where the tab
     # stopped them, and the reading that comes back with the error describes

@@ -15,13 +15,14 @@ the floor inside at z = 0.016 m. Every ball is a sphere of 30 mm base radius,
 so a resting ball's centre is at z = 0.050 m. Balls sit on three rows at
 y = -0.115, 0.000 and 0.115 m. Nothing says which ball is where: no camera
 sees into the box and no API reading reports a ball's position, so the pads
-are the only sensor. The bowl is centred on x = 0.49, y = -0.34 m with a
+are the only sensor.  Read them with describe_tactile(); the description is
+the only tactile reading this task gives you. The bowl is centred on x = 0.49, y = -0.34 m with a
 radius of 75 mm, its wall rising to z = 0.051 m.
 
-The episode ends by itself after about four minutes of simulated time, and
+The episode ends by itself after about two minutes of simulated time, and
 motion is what spends it: every move and every close costs, a pad read on a
-still arm does not. Sweeping all three rows is affordable; sweeping them
-several times over is not.
+still arm does not. One pass along the three rows is affordable; a second pass
+is not.
 
 A ball counts only if both pads are holding it while it is lifted clear of the
 box and if it comes to rest inside the bowl. Releasing one in the bowl that is
@@ -546,7 +547,7 @@ for row_index, row_y in enumerate(ROW_Y):
         say("  -> textured (imprint relief %.3f mm); grasping" % relief)
         STATE["calls"] += 1
         try:
-            reading = close_gripper(force_threshold=GRASP_DEPTH_MM)
+            reading = close_gripper(position=0.60)
         except RuntimeError:
             say("  the grasp close stopped short of its depth target")
             reading = get_tactile_data()

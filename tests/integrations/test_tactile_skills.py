@@ -43,16 +43,12 @@ LINK = re.compile(r"\[\[([^\]]+)\]\]")
 # with the mechanism that honoured it; this test is what keeps it deleted.
 SECTION_MARKER = "[section:"
 
-# The skills every task must receive, whichever type it belongs to: they are
-# the ones whose absence would make a reading meaningless rather than merely
-# less precise.
+# The skills every task must receive, whichever type it belongs to.
+# Removed tactile-scalar skills (depth-grip-scale, contact-flag-is-range,
+# reflex-stop-on-events, grasp-verification, tactile-cannot-locate) —
+# those belonged to the scalar API which is gone in this branch.
 CORE = {
-    "depth-grip-scale",
-    "contact-flag-is-range",
     "one-call-approach",
-    "reflex-stop-on-events",
-    "grasp-verification",
-    "tactile-cannot-locate",
 }
 
 
@@ -425,7 +421,10 @@ def test_compact_block_is_one_line_per_skill_and_within_budget(library) -> None:
             # it (three blocks when the lead rides the grasp, four when it does
             # not), and the evidence carries the datum.
             # bulb_tightening 663 words over 25 skills, 12 inside the bound.
-            assert len(block.split()) < 27 * len(skills), (task, len(block.split()))
+            # The header line adds ~8 words of fixed overhead regardless of
+            # skill count, so the bound is per-skill words + header budget.
+            _HEADER_WORDS = 10  # "TACTILE SKILLS (routed to X, type Y):"
+            assert len(block.split()) < 27 * len(skills) + _HEADER_WORDS, (task, len(block.split()))
             assert len(block.split()) < 800, (task, len(block.split()))
 
 
@@ -511,15 +510,18 @@ def test_a_task_outside_the_taxonomy_gets_nothing() -> None:
 def test_hook_routes_by_default() -> None:
     block = _StubTask("weight_classify")._tactile_skill_block()
     assert block.startswith("TACTILE SKILLS (routed to weight_classify, type classify):")
-    assert "gel-shear-weight" in block
+    # Skills that still exist after the scalar-API removal:
+    assert "one-call-approach" in block
+    # Skills that were deleted with the scalar API:
+    assert "gel-shear-weight" not in block
     assert "mirrored-shear-slide" not in block  # screw only
 
 
 def test_hook_takes_explicit_names() -> None:
     block = _StubTask(
-        "lift_can", tactile_skills=("depth-grip-scale",)
+        "lift_can", tactile_skills=("one-call-approach",)
     )._tactile_skill_block()
-    assert "depth-grip-scale" in block
+    assert "one-call-approach" in block
     assert "gel-shear-weight" not in block
 
 
@@ -553,9 +555,9 @@ def test_naming_skills_by_hand_skips_the_tactile_check() -> None:
     """An explicit list is a deliberate choice, so it is honoured as written."""
     motion = _API(("goto_pose",))
     block = _StubTask(
-        "lift_can", _apis={"motion": motion}, tactile_skills=("depth-grip-scale",)
+        "lift_can", _apis={"motion": motion}, tactile_skills=("one-call-approach",)
     )._tactile_skill_block()
-    assert "depth-grip-scale" in block
+    assert "one-call-approach" in block
 
 
 def test_hook_refuses_an_unknown_skill() -> None:
@@ -582,8 +584,11 @@ def test_the_complete_prompt_carries_the_block_after_the_apis() -> None:
 
     routed = _get_complete_prompt(_Env("bulb_tightening"))
     assert routed.startswith("Do the thing.\nAPIs:\n\n\nTACTILE SKILLS")
-    assert "lead-by-overshoot" in routed
-    assert "gel-shear-weight" not in routed  # classify only
+    # Surviving skills for screw type:
+    assert "bulb-grasp-pose" in routed
+    # Deleted scalar-channel skills no longer appear:
+    assert "lead-by-overshoot" not in routed
+    assert "gel-shear-weight" not in routed
 
     off = _get_complete_prompt(_Env("bulb_tightening", tactile_skills=()))
     assert off == "Do the thing.\nAPIs:\n"
@@ -624,7 +629,7 @@ def test_the_only_hook_override_is_the_perception_bulb_variant() -> None:
     block = _StubTask("bulb_tightening", tactile_skills=tuple(named))._tactile_skill_block()
     assert "bulb-grasp-pose" not in block
     assert "sample_grasp_pose" not in block
-    assert "lead-by-overshoot" in block  # the rest of the bulb set is still there
+    assert "feed-must-match-lead" in block  # the rest of the bulb set is still there
 
 
 def test_no_task_class_prunes_the_api_doc() -> None:
@@ -714,4 +719,4 @@ def test_taxonomy_typos_fail(tmp_path: Path) -> None:
 def test_the_shipped_library_is_the_one_under_test(library) -> None:
     """Guard against the tests passing on a stale copy elsewhere on the path."""
     assert library.root == LIBRARY_ROOT
-    assert len(library) >= 52
+    assert len(library) >= 14  # 14 skills remain after the scalar-protocol purge

@@ -15,11 +15,11 @@ Write ONLY executable Python code (no code fences). Import numpy if needed.
 ORACLE_CODE = """
 import numpy as np
 
-close_gripper()
+close_gripper(position=0.45)
 rotate_gripper("can", 1.5, steps=6)  # rotate in place, around can's axis
 open_gripper()
 if not check_success():
-    close_gripper()
+    close_gripper(position=0.45)
     rotate_gripper("can", 0.3, steps=2)
     open_gripper()
 

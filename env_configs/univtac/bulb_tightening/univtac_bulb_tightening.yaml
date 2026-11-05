@@ -85,7 +85,11 @@
 # The key is whitelisted per task in launch_utils.py (merged_config) - without
 # that line it is silently dropped.  Only this config sets it; the 2400 s
 # default is unchanged for the other 33.
-exec_alarm_seconds: 10500
+# 2026-11-05: capped at 3600 s (one hour) by policy.  In the text arm the
+# insertion did not progress past the first blocks -- the bulb's pose stayed
+# at its rest height and the yaw did not accumulate -- so a longer clock only
+# spends wall time without buying depth.
+exec_alarm_seconds: 3600
 
 env:
   _target_: capx.envs.tasks.tactile.univtac_bulb_tightening.UniVTACBulbTighteningCodeEnv
@@ -93,11 +97,14 @@ env:
     _target_: capx.envs.tasks.base.CodeExecEnvConfig
     low_level: env_configs/univtac/bulb_tightening/low_level_bulb_tightening.yaml
     # Inert for UniVTAC: base.py:248 only consults this when low_level is a
-    # gym-registry string, not a YAML path.  Every other univtac config sets
-    # false for the same reason.  What makes this task privileged is the API
-    # class below - UniVTACTactileApi reads /object_pose, the simulator's
-    # ground truth, whereas UniVTACPerceptionApi would segment the head camera
-    # with SAM3 instead.
+    # gym-registry string, not a YAML path.  What makes this task privileged is
+    # the API class below - UniVTACTactileApi reads /object_pose, the
+    # simulator's ground truth, whereas UniVTACPerceptionApi would segment the
+    # head camera with SAM3 instead.
+    #
+    # The text arm's close is positional: the gel-depth servo is the scalar
+    # tactile layer's channel and is not part of this arm.  The pads'
+    # description is used for the grip check.
     privileged: false
     apis:
       - UniVTACTactileApi
@@ -121,3 +128,8 @@ output_dir: ./outputs/univtac_bulb_tightening
 trials: 19
 resume_idx: 19
 num_workers: 1  # Isaac Sim is not parallel-safe
+
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions

@@ -670,12 +670,6 @@ def _run_single_trial(
     """
     trial_start_time = time.time()
 
-    # Every row the tactile trace writes from here on belongs to this trial.
-    # The runner executes all trials in one process, so without this the run
-    # leaves a single stream that no outcome can be attributed to.
-    from capx.integrations.tactile import trace as tactile_trace
-    tactile_trace.set_trial(trial)
-
     use_video_diff = config.get("use_video_differencing", False)
     use_wrist = config.get("use_wrist_camera", False)
 
@@ -992,7 +986,29 @@ def _run_single_trial(
         except Exception as exc:
             print(f"[SkillLibrary] Skill extraction failed: {exc}")
 
-    print(f"Trial {trial} took {time.time() - trial_start_time:.2f} seconds")
+    elapsed_s = time.time() - trial_start_time
+    print(f"Trial {trial} took {elapsed_s:.2f} seconds")
+
+    # The server's episode clock: physics ticks since reset.  The motion and
+    # tactile replies carry it, but generated code drops it; one query here
+    # keeps a per-trial step count next to the wall time (UniVTAC tasks only).
+    physics_step = None
+    _low_level = getattr(env, "low_level_env", None)
+    if _low_level is not None and hasattr(_low_level, "physics_step"):
+        physics_step = _low_level.physics_step()
+    if physics_step is not None:
+        print(f"Trial {trial} physics steps: {physics_step}")
+
+    # Keep the per-trial wall-clock in the trial's own summary: the console
+    # line is the only other place it exists, and that log lives outside the
+    # experiment directory.  Summary is written before this point, so append.
+    if code_path:
+        with open(
+            os.path.join(os.path.dirname(code_path), "summary.txt"), "a"
+        ) as f:
+            f.write(f"\nTrial {trial} took {elapsed_s:.2f} seconds\n")
+            if physics_step is not None:
+                f.write(f"Trial {trial} physics steps: {physics_step}\n")
 
     gc.collect()
 

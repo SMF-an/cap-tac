@@ -4,21 +4,14 @@ PROMPT = """
 You are controlling a Franka Emika robot with GelSight Mini tactile sensors
 on both fingertips. The API is described below.
 
-Goal: Grasp the prism, use tactile sensing to determine whether its surface
-texture is rough or smooth, and gently place it on the matching pad:
-  - Rough texture → orange pad
-  - Smooth texture → green pad
+Goal: Grasp the prism, use touch to decide whether its surface texture is
+rough or smooth, and place it on the matching pad:
+  - Rough texture → orange_pad
+  - Smooth texture → green_pad
 
-Key rules:
-- Texture is read from the gel's marker-image anisotropy (get_tactile_data),
-  and its size depends on how hard the gel is pressed — so it is read at two
-  COMMANDED grip depths and the two are compared. Which channel, which two
-  depths, and the calibrated values to split on are in the tactile skills at
-  the end of this prompt.
-- Place the prism with the placement recipe in those same skills: the task is
-  scored on where it ends up, upright and on the right pad.
-- Final placement: within 2 cm horizontally and 1 cm vertically, upright
-  within 15°.
+Read the texture with describe_tactile(), which returns a natural-language
+description of what the gel feels.  The task is scored on where the prism ends
+up: within 2 cm horizontally and 1 cm vertically, upright within 15°.
 
 Write ONLY executable Python code (no code fences). Import numpy if needed.
 """
@@ -26,80 +19,49 @@ Write ONLY executable Python code (no code fences). Import numpy if needed.
 ORACLE_CODE = """
 import numpy as np
 
-def aniso(fb):
-    # A dropped render makes one pad read None; fall back to the other, and to
-    # isotropic (the plain side) if both are gone, rather than raising.
-    v = [fb["left_marker_anisotropy"], fb["right_marker_anisotropy"]]
-    v = [x for x in v if x is not None]
-    return sum(v) / len(v) if v else 1.0
-
-def depth(fb):
-    return 0.5 * (fb["left_depth_mm"] + fb["right_depth_mm"])
-
-def contacts_ok(fb):
-    return fb["left_contact"] and fb["right_contact"]
-
-# --- Grasp at a light commanded grip (retry firmer if the first close missed) ---
+# --- Grasp at a light commanded grip ---
 grasp_pos, grasp_quat = sample_grasp_pose("prism")
 goto_pose(grasp_pos, grasp_quat, z_approach=0.05)
-fb = close_gripper(force_threshold=27.5)
-if not contacts_ok(fb):
-    open_gripper()
-    fb = close_gripper(force_threshold=25.0)
+close_gripper(position=0.20)
 
 # Lift clear of the table before probing
 move_delta(dz=0.05)
 
-# --- Texture probe: marker anisotropy at a light vs a firm grip ---
-# Rough => the gel picks up the ridges as horizontal banding, so the row/column
-# gradient ratio climbs steeply with gel depth (0.10-0.13 per mm); plain stays
-# near isotropic (0.01-0.03 per mm).  Taking the CHANGE between two commanded
-# grips cancels wherever the first close happened to land.
-light = get_tactile_data()
-close_gripper(force_threshold=20.5)
-firm = get_tactile_data()
+# Firm up the grip so the texture registers on the gel image
+close_gripper(position=0.15)
 
-dd = depth(light) - depth(firm)          # depth falls as the grip firms
-da = aniso(firm) - aniso(light)
-if dd > 1.0:
-    slope = da / dd
-    texture = "rough" if slope > 0.06 else "plain"
-    print(f"aniso {aniso(light):.3f} -> {aniso(firm):.3f} over {dd:.2f} mm "
-          f"= {slope:.3f}/mm -> {texture}")
+# --- Texture classification via Octopi language description ---
+result = describe_tactile(
+    side="both",
+    prompt="Is this surface rough or smooth? Answer with one word: rough or smooth.",
+)
+description = result["description"].lower()
+print(f"Tactile description: {description}")
+
+if "rough" in description:
+    texture = "rough"
 else:
-    # The second close did not move the gel (fingers pinned): the difference
-    # carries no information, so fall back to the single-reading calibration
-    # for the depth band the grip actually landed in.
-    d = depth(firm)
-    if d < 25.0:
-        texture = "rough" if aniso(firm) > 1.38 else "plain"
-    else:
-        texture = "rough" if aniso(firm) > 1.07 else "plain"
-    print(f"grip pinned (dd={dd:.2f} mm, depth={d:.2f}); single reading "
-          f"{aniso(firm):.3f} -> {texture}")
+    texture = "plain"
+print(f"Classified as: {texture}")
 
-# --- Verify the prism is still held (re-grasp if probing dropped it) ---
+# --- Verify the prism is still held ---
 prism_pos, _, prism_ext = get_object_pose("prism", return_bbox_extent=True)
-fb = get_tactile_data()
-if not contacts_ok(fb) or prism_pos[2] < 0.03:
+if prism_pos[2] < 0.03:
     open_gripper()
     goto_pose(grasp_pos, grasp_quat, z_approach=0.05)
-    close_gripper()
+    close_gripper(position=0.20)
     prism_pos, _, prism_ext = get_object_pose("prism", return_bbox_extent=True)
 
 # --- Place on the matching pad ---
-# position = prim origin (bottom face for prism/pads), bbox = FULL size:
-# pad top = pad_pos[2] + pad_ext[2].  Prism origin must rest on it.
 target_pad = "orange_pad" if texture == "rough" else "green_pad"
 pad_pos, _, pad_ext = get_object_pose(target_pad, return_bbox_extent=True)
 
 ee_pos = np.array(grasp_pos) + np.array([0.0, 0.0, 0.05])
 offset = ee_pos - prism_pos
 target_prism = np.array([pad_pos[0], pad_pos[1],
-                         pad_pos[2] + pad_ext[2] - 0.001])   # 1 mm press
+                         pad_pos[2] + pad_ext[2] - 0.001])
 goto_pose(target_prism + offset, grasp_quat, z_approach=0.1)
 
-# Verify the descent before releasing (err low, never drop from a height)
 for _ in range(10):
     p, _, _ = get_object_pose("prism")
     gap = p[2] - (pad_pos[2] + pad_ext[2])

@@ -23,7 +23,7 @@ move_delta(dry=-1.0)
 for step in range(4):
     move_delta(dry=0.3)
     if detect_slip():
-        close_gripper()
+        close_gripper(position=0.45)
 
 # Lower into bay
 for step in range(10):

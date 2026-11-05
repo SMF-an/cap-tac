@@ -15,7 +15,7 @@ copies:
 
 Split every motion into three: rise clear, travel, descend. Keep the travelled
 leg well above the table, and make the descent the only slow part — small steps,
-stopping on contact or on the depth ([[small-step-insertion]]).
+stopping on contact.
 
 ## Traps
 

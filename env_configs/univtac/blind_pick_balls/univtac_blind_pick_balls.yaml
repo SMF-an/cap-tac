@@ -59,18 +59,15 @@
 #
 # --- Budget -------------------------------------------------------------------
 #
-# The task's own clock is episode_seconds = 240 s, and it ends the episode
-# itself with failure = 'timeout' at 240 s / physics_dt = 28800 physics steps =
-# 14400 control steps (physics 120 Hz, action_repeat 2).  That is the hard cap
-# on any run here; exec_alarm_seconds only has to sit above it in wall clock.
+# The task's own clock is episode_seconds = 120 s, and it ends the episode
+# itself with failure = 'timeout' at 120 s / physics_dt = 14400 physics steps =
+# 7200 control steps (physics 120 Hz, action_repeat 2).
 #
 # Wall cost per control step on this rig is measured for other ViTaForge tasks
-# at ~0.38 s (wipe_vase) to ~0.5 s (blind_pick's search), so a full-budget
-# episode is 5500-7200 s.  7200 s is that upper bound and nothing else: a run
-# that reaches it has already spent the whole simulated episode.  It is a
-# first-round figure, not a measurement -- this task has never been run through
-# cap-x -- and the oracle prints its own call count and per-probe log, so the
-# trial log is complete even if the alarm ends the run.
+# at ~0.38 s (wipe_vase) to ~0.5 s (blind_pick's search), so the task's 120 s
+# episode costs 2700-3600 s of wall clock.  Since 2026-11-04 the one-hour cap
+# (exec_alarm_seconds 3600) matches it: the task's own timeout and the
+# harness's alarm now end a full episode at about the same wall time.
 #
 # The oracle's own path is much shorter (three 275 mm rakes at 15 mm per call,
 # one probe and one carry), so a healthy round should finish far inside it.  If
@@ -91,7 +88,7 @@
 #
 # Scripted (oracle) rounds pass --use-oracle-code on the command line, as every
 # other univtac config does.
-exec_alarm_seconds: 7200
+exec_alarm_seconds: 3600
 
 env:
   _target_: capx.envs.tasks.tactile.univtac_blind_pick_balls.UniVTACBlindPickBallsCodeEnv
@@ -126,6 +123,11 @@ output_dir: ./outputs/univtac_blind_pick_balls
 # seed, so a run here says nothing about any other seed, and the server serving
 # it cannot reset to one.  Move both numbers together AND restart the server on
 # the same seed for each round.
-trials: 8
-resume_idx: 8
+trials: 1
+resume_idx: 1
 num_workers: 1  # Isaac Sim is not parallel-safe
+
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions

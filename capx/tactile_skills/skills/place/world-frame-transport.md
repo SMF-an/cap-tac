@@ -31,4 +31,4 @@ arithmetic: the object moves exactly what the hand moves.
   ~3 cm first. See [[lift-before-lateral]].
 - A world-delta loop only terminates where the API lets it: the 2 mm floor is
   the end of the loop, not a step to round a residual up to
-  ([[small-step-insertion]]).
+

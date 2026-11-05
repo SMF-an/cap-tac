@@ -100,11 +100,6 @@ UNIVTAC_ROOT = Path(os.environ.get("UNIVTAC_ROOT", str(_REPO_ROOT.parent / "UniV
 # just need a different backing root on sys.path (see TASK_BACKING below).
 VITAFORGE_ROOT = Path(os.environ.get("VITAFORGE_ROOT", str(_REPO_ROOT.parent / "ViTaForge")))
 
-# One line per tactile reading (marker displacement + depth + ground-truth
-# texture) appended on every tactile read, for calibrating the
-# rough/smooth classification thresholds in the grasp_classify prompt.
-TACTILE_CALIBRATION_LOG = _REPO_ROOT / "outputs" / "univtac_tactile_calibration.log"
-
 AVAILABLE_TASKS = [
     "insert_hole",
     "insert_tube",
@@ -947,12 +942,6 @@ def _sim_reset(seed: int, *, log: bool = True) -> dict:
             _MARKER_REFERENCE["right"] = _MARKER_REFERENCE["right"][1].clone()
     except Exception:
         _MARKER_REFERENCE = None
-    try:
-        truth = getattr(_TASK, "choice", None)
-        with open(TACTILE_CALIBRATION_LOG, "a") as _f:
-            _f.write(f"--- reset task={_TASK_NAME} seed={seed} truth={truth} ---\n")
-    except Exception:
-        pass
     return {"success": _TASK.plan_success, "seed": seed, "step_limit": _TASK.cfg.step_lim}
 
 
@@ -1764,32 +1753,6 @@ def _sim_get_tactile_data() -> dict:
                 logger.warning(
                     "Height-map roughness unavailable: %s", traceback.format_exc()
                 )
-
-        try:
-            truth = getattr(_TASK, "choice", None)
-            ld = left_min_depth if left_min_depth != float("inf") else -1.0
-            rd = right_min_depth if right_min_depth != float("inf") else -1.0
-            parts = [
-                f"step={_TASK.step_count}", f"truth={truth}",
-                f"L_disp={left_displacement:.3f}", f"R_disp={right_displacement:.3f}",
-            ]
-            for side, key, marker in (
-                ("L", "left", left_marker), ("R", "right", right_marker)
-            ):
-                if marker is not None and _ref(key) is not None:
-                    m, mx, coh, _, _ = _marker_stats(marker, _ref(key))
-                    parts.append(
-                        f"{side}_mean={m:.3f} {side}_max={mx:.3f} "
-                        f"{side}_coh={coh:.3f}"
-                    )
-            if left_roughness is not None:
-                parts.append(
-                    f"L_rgh={left_roughness:.4f} R_rgh={right_roughness:.4f}"
-                )
-            with open(TACTILE_CALIBRATION_LOG, "a") as _f:
-                _f.write(" ".join(parts) + f" L_depth={ld:.1f} R_depth={rd:.1f}\n")
-        except Exception:
-            pass
 
         result = {
             # The episode clock.  Not a tactile reading -- it rides here

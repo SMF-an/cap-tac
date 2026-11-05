@@ -201,15 +201,23 @@ class CodeExecutionEnvBase(Env):
 
         The taxonomy routes by task name, and the ablation configs
         (`*_no_tactile*.yaml`) keep the task name while swapping the tactile
-        API for `UniVTACMotionApi` -- so name alone would hand a full page of
-        gel recipes to a robot that has no way to touch anything.
+        API for `UniVTACMotionApi` -- so name alone would hand a page of
+        gel-related skills to a robot that has no way to touch anything.
 
         An empty or absent `_apis` is read as "cannot tell", which delivers.
+
+        In the Octopi branch the tactile entry point is ``describe_tactile``
+        (text output) rather than ``get_tactile_data`` (scalars).  A task
+        that exposes either is considered to be reading the gel.
         """
         apis = getattr(self, "_apis", None)
         if not apis:
             return True
-        return any("get_tactile_data" in api.functions() for api in apis.values())
+        return any(
+            "get_tactile_data" in api.functions()
+            or "describe_tactile" in api.functions()
+            for api in apis.values()
+        )
 
     def _tactile_skill_block(self) -> str:
         """The tactile-skill block this task's prompt ends with.

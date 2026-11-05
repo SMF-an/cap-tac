@@ -98,7 +98,11 @@
 # (merged_config) -- without that line it is silently dropped.  A perception
 # run pays an extra get_object_pose and a re-grasp at the front, both small
 # next to the turning.
-exec_alarm_seconds: 10500
+# 2026-11-05: capped at 3600 s (one hour) by policy.  In the text arm the
+# insertion did not progress past the first blocks -- the bulb's pose stayed
+# at its rest height and the yaw did not accumulate -- so a longer clock only
+# spends wall time without buying depth.
+exec_alarm_seconds: 3600
 
 env:
   _target_: capx.envs.tasks.tactile.univtac_bulb_tightening.UniVTACBulbTighteningPerceptionCodeEnv

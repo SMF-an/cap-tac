@@ -95,9 +95,7 @@ move_delta = _api.move_delta
 move_reflexive = _api.move_reflexive
 open_gripper = _api.open_gripper
 close_gripper = _api.close_gripper
-get_tactile_data = _api.get_tactile_data
-get_tactile_image = _api.get_tactile_image
-detect_slip = _api.detect_slip
+describe_tactile = _api.describe_tactile
 get_object_pose = _api.get_object_pose
 sample_grasp_pose = _api.sample_grasp_pose
 rotate_gripper = _api.rotate_gripper
@@ -156,13 +154,12 @@ __all__ = [
     # motion
     "goto_pose", "move_delta", "move_reflexive", "open_gripper", "close_gripper",
     "rotate_gripper",
-    # tactile
-    "get_tactile_data", "get_tactile_image", "detect_slip",
+    # tactile text
+    "describe_tactile",
     # perception
     "get_object_pose", "sample_grasp_pose",
     # observation & meta
     "get_observation", "get_ee_pose", "check_success", "health", "episode_video", "api_doc",
-    # config (TASK / SERVER_URL stay module-internal: they only feed the
-    # client construction above; agents read TASK_DESCRIPTION / SAM3_PROMPTS)
+    # config
     "TASK_DESCRIPTION", "SAM3_PROMPTS",
 ]

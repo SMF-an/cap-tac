@@ -3,16 +3,26 @@
 Functions in this class are called directly by LLM-generated Python code
 during trial execution.  Each function's docstring appears verbatim in the
 LLM prompt (via :meth:`ApiBase.combined_doc`), so it describes what the
-function and its arguments ARE: ranges, units, hard limits, and the fields
-the return carries.  How to USE a function on a task -- which reading to
-take, what to compare it against, which trap the obvious version falls
-into -- is not written here.  That lives in the tactile skill library
-(``capx.tactile_skills``), which is delivered to the task alongside this doc,
-so each rule has one owner instead of a copy in every prompt.  Functions
-listed in ``_prompt_hidden`` stay callable at execution time but are excluded
-from the prompt (see ``check_success``).
+function and its arguments ARE.
 
-All calls are forwarded to the UniVTAC API server over HTTP.
+**Tactile representation:** this branch replaces the scalar tactile-vector
+layer (depth_mm, displacement_px, coherence, shear, anisotropy, roughness)
+with natural-language descriptions produced by the Octopi-1.5 visual-tactile
+language model.  The purpose is an ablation experiment: both the original
+scalar arm and this text arm run the same UniVTAC eval harness so the numbers
+are directly comparable.
+
+Motion primitives return only the physics clock ``{"step": int}``.
+The one tactile-sensing call is ``describe_tactile()``.
+
+All motion/perception calls are forwarded to the UniVTAC API server over HTTP.
+The Octopi service runs as a separate process on port 8130 (override with
+``OCTOPI_SERVER_URL``).  Start it with::
+
+    CUDA_VISIBLE_DEVICES=1 ~/miniconda3/envs/octopi/bin/python \\
+        /mnt/nas/shimufan/octopi-1.5/octopi_serve.py \\
+        --weights /mnt/nas/shimufan/octopi-1.5/octopi_s/data/weights \\
+        --port 8130
 """
 
 from __future__ import annotations
@@ -20,6 +30,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import re
 import time
 from typing import Any
 
@@ -29,137 +40,33 @@ from PIL import Image
 
 from capx.envs.base import BaseEnv
 from capx.integrations.base_api import ApiBase
-from capx.integrations.tactile import trace as tactile_trace
 
-# Default server URL — override via env var UNIVTAC_SERVER_URL
 _DEFAULT_SERVER = "http://127.0.0.1:8120"
-
-# Read timeout for motion POSTs.  Must exceed the server-side _MOTION_TIMEOUT
-# (1500 s, launch_univtac_server.py) plus its dispatch grace, so a merely-slow
-# physics op returns its real response rather than being cut off here.  Raising
-# only the server side would turn a slow op into a client-side ReadTimeout,
-# which runner.py treats as a retryable timeout and restarts the whole trial
-# from depth 0.  Raise both or neither.
-_READ_TIMEOUT = 1800.0
-
-# Scalar tactile fields returned by the motion primitives (goto_pose,
-# move_delta, open/close_gripper, rotate_gripper).  Every reading this API
-# documents is built from these — contact and depth (hardness), marker shear
-# (weight), marker anisotropy and imprint relief (texture) — so a close or a
-# lift carries its own reading instead of forcing a get_tactile_data() call
-# straight afterwards.  The images are the one thing withheld: those are what
-# that call is for.
-_MOTION_TACTILE_FIELDS = (
-    # The episode clock rides in the same payload rather than in a call of
-    # its own: a policy already reads this after every motion, and a hold
-    # measured in seconds needs two of them.
-    "step",
-    "left_contact",
-    "right_contact",
-    "left_depth_mm",
-    "right_depth_mm",
-    "left_marker_displacement_px",
-    "right_marker_displacement_px",
-    "left_marker_coherence",
-    "right_marker_coherence",
-    "left_marker_shear_dx",
-    "left_marker_shear_dy",
-    "right_marker_shear_dx",
-    "right_marker_shear_dy",
-    "left_height_roughness_mm",
-    "right_height_roughness_mm",
-)
+_DEFAULT_OCTOPI  = "http://127.0.0.1:8130"
+_READ_TIMEOUT    = 1800.0
+_OCTOPI_TIMEOUT  = 30.0
 
 
 def _settled_note(data: dict) -> str:
-    """The server's success note, ready to append to a motion tool's print.
-
-    A motion that succeeds normally answers "OK".  The blind-ball adapter
-    also reports a move that came to rest a few millimetres short of its goal
-    as executed, and says where the hand actually stopped; that sentence is a
-    fact about the world the caller acts on, so it goes out with the tool's
-    own line instead of staying in the server log.
-    """
     note = (data or {}).get("message") or ""
     return f" - {note}" if note and note != "OK" else ""
 
 
-def _trim_motion_tactile(data: dict) -> dict:
-    """Keep the scalar tactile readings from a full tactile dict.
-
-    The marker images and depth images are dropped.  Anisotropy rides along
-    because the server now computes it; a response that predates that still
-    gets it derived from the marker image, which comes back with every motion,
-    so the return carries every scalar either way.
-    """
-    out = {k: data[k] for k in _MOTION_TACTILE_FIELDS if k in data}
-    for side in ("left", "right"):
-        key = f"{side}_marker_anisotropy"
-        if key in data:
-            out[key] = data[key]
-            continue
-        try:
-            value = _marker_anisotropy(data.get(f"{side}_rgb_base64", ""))
-        except Exception:
-            # A motion call must never fail over a derived scalar.
-            value = None
-        if value is not None:
-            out[key] = value
-    return out
-
-
-def _fmt(value: float | None, spec: str = ".2f") -> str:
-    """One log-line number, with the missing case spelled out."""
-    return "n/a" if value is None else format(value, spec)
-
-
-def _marker_anisotropy(b64: str) -> float | None:
-    """Row-to-row over column-to-column gradient of a marker image.
-
-    Every scalar the API exposes for the gel is an average over the image,
-    and an average cannot see spatial structure — which is exactly where
-    surface roughness shows up: pressed against a rough surface the gel is
-    imprinted with horizontal banding, which raises the row gradient while
-    leaving the column gradient alone.  A plain surface deforms the gel
-    evenly and the image stays near isotropic.  Returns 1.0 for an
-    isotropic (unloaded or evenly loaded) gel, and None when the image is
-    unavailable.
-
-    The server computes this same reading from the same image and sends it
-    with every tactile payload; this is the fallback for a response that
-    carries no value of its own.  Both paths quantize identically, so the
-    number does not depend on which one produced it.
-    """
-    if not b64:
-        return None
-    img = Image.open(io.BytesIO(base64.b64decode(b64)))
-    g = np.asarray(img.convert("RGB"), dtype=np.float64).mean(axis=2)
-    row = float(np.abs(np.diff(g, axis=0)).mean())
-    col = float(np.abs(np.diff(g, axis=1)).mean())
-    return row / col if col > 1e-9 else None
+def _step_from(data: dict) -> int:
+    return int((data.get("tactile") or {}).get("step", 0))
 
 
 class UniVTACTactileApi(ApiBase):
     """Robot control API for a Franka arm with GelSight Mini tactile sensors.
 
-    Provides motion, tactile sensing, and perception primitives for
+    Provides motion, tactile description, and perception primitives for
     contact-rich manipulation tasks (insertion, grasping, placement).
     The robot is controlled via Cartesian end-effector poses solved
-    through inverse kinematics.  Tactile feedback from the left and
-    right GelSight Mini fingertips is available after every motion.
+    through inverse kinematics.  Tactile feedback is available as natural-
+    language descriptions via describe_tactile().
     """
 
-    # Hidden from the LLM prompt: check_success is a ground-truth oracle.
-    # The framework appends a final check_success() call after code generation
-    # (CodeExecEnvConfig.append_final_check) and computes the reward itself
-    # after each step, so the agent neither sees nor needs this function.
     _prompt_hidden = {"check_success"}
-
-    # This class is the privileged line: get_object_pose reads /object_pose,
-    # the simulator's ground truth.  It may therefore ask the server for a
-    # grasp pose built from that ground truth, which is the only thing that
-    # works on a task whose pre_move does not leave the EE above the object.
-    # UniVTACPerceptionApi, the SAM3 line, keeps the EE-relative pose instead.
     _ground_truth_grasp = True
 
     def __init__(self, env: BaseEnv, server_url: str | None = None) -> None:
@@ -167,9 +74,7 @@ class UniVTACTactileApi(ApiBase):
         self._server = server_url or os.environ.get(
             "UNIVTAC_SERVER_URL", _DEFAULT_SERVER
         )
-        # Reference (L, R) marker displacements for delta-based slip detection.
-        # None until the first detect_slip call establishes it.
-        self._slip_baseline: tuple[float, float] | None = None
+        self._octopi = os.environ.get("OCTOPI_SERVER_URL", _DEFAULT_OCTOPI)
 
     # ------------------------------------------------------------------
     # ApiBase interface
@@ -177,16 +82,15 @@ class UniVTACTactileApi(ApiBase):
 
     def functions(self) -> dict[str, Any]:
         return {
-            "goto_pose": self.goto_pose,
-            "move_delta": self.move_delta,
-            "open_gripper": self.open_gripper,
-            "close_gripper": self.close_gripper,
-            "get_tactile_data": self.get_tactile_data,
-            "detect_slip": self.detect_slip,
-            "get_object_pose": self.get_object_pose,
+            "goto_pose":         self.goto_pose,
+            "move_delta":        self.move_delta,
+            "open_gripper":      self.open_gripper,
+            "close_gripper":     self.close_gripper,
+            "describe_tactile":  self.describe_tactile,
+            "get_object_pose":   self.get_object_pose,
             "sample_grasp_pose": self.sample_grasp_pose,
-            "rotate_gripper": self.rotate_gripper,
-            "check_success": self.check_success,
+            "rotate_gripper":    self.rotate_gripper,
+            "check_success":     self.check_success,
         }
 
     # ------------------------------------------------------------------
@@ -194,7 +98,6 @@ class UniVTACTactileApi(ApiBase):
     # ------------------------------------------------------------------
 
     def _server_health(self, timeout: float = 3.0) -> bool:
-        """Best-effort GET /health probe — True only on an HTTP 200."""
         try:
             r = requests.get(f"{self._server}/health", timeout=timeout)
             return r.status_code == 200
@@ -207,26 +110,10 @@ class UniVTACTactileApi(ApiBase):
             r = requests.post(
                 f"{self._server}{path}",
                 json=body or {},
-                # Must exceed the server-side _MOTION_TIMEOUT (1500 s) plus its
-                # 5 s dispatch grace, so a merely-slow op surfaces as a clean
-                # HTTP 5xx instead of a client-side hang.  A true C++ freeze
-                # (GIL held — even /health cannot answer) is killed by the
-                # external watchdog after its 120 s grace, which lands well
-                # inside this timeout, so the client sees a fast connection
-                # reset rather than the full 1800 s wait.
                 timeout=_READ_TIMEOUT,
             )
             r.raise_for_status()
         except requests.exceptions.ReadTimeout:
-            # A ReadTimeout does NOT imply the full read timeout elapsed.
-            # urllib3 catches socket.timeout, and on Python 3.10+ socket.timeout
-            # IS TimeoutError — so the harness's own wall-clock alarm
-            # (runner.py raises TimeoutError from its SIGALRM handler) is
-            # converted into this exception the moment it fires, however few
-            # seconds the request had been waiting.  Measure before blaming
-            # the server: 2026-10-02 a bulb trial was reported as "did not
-            # respond within 600s" when the request had been out for 42 s and
-            # the alarm had simply gone off.
             waited = time.monotonic() - started
             if waited < _READ_TIMEOUT * 0.9:
                 raise RuntimeError(
@@ -270,7 +157,6 @@ class UniVTACTactileApi(ApiBase):
                 f"/health to answer before retrying."
             )
         except requests.exceptions.HTTPError as e:
-            # Server returned HTTP 4xx/5xx — extract detail if available
             detail = ""
             try:
                 detail = e.response.text[:500]
@@ -282,24 +168,37 @@ class UniVTACTactileApi(ApiBase):
                 f"Server response: {detail}"
             )
         data = r.json()
-        # Recorded before the success check: a motion the server refused
-        # still carries the tactile state that made it refuse, and that
-        # state is usually the half of the row worth keeping.
-        tactile = data.get("tactile")
-        if isinstance(tactile, dict):
-            tactile_trace.record(path, tactile, body)
         if not data.get("success", True):
             msg = data.get("message", "Unknown motion error")
             raise RuntimeError(f"Motion failed: {msg}")
+        self._note_step(data)
         return data
+
+    def _note_step(self, data: dict) -> None:
+        """Remember the episode clock from any reply that carries it.
+
+        Every motion and tactile reply carries the physics tick count, but the
+        generated code usually drops it.  Keep the last one on the API and on
+        the low-level env so the trial harness can still report a step count
+        when the server is busy: a wall-clock alarm can leave a motion running
+        on its main thread, and the post-trial /tactile query then times out.
+        """
+        try:
+            tactile = data.get("tactile") or {}
+            step = int(tactile.get("step", data.get("step", 0)) or 0)
+        except Exception:
+            step = 0
+        if step:
+            self._last_step = step
+            env = getattr(self, "_env", None)
+            if env is not None:
+                setattr(env, "_last_api_step", step)
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         try:
             r = requests.get(
                 f"{self._server}{path}",
                 params=params or {},
-                # Query watchdog server-side is 30s + 5s dispatch grace; the
-                # client must outwait it to see the clean 503 response.
                 timeout=40,
             )
             r.raise_for_status()
@@ -327,7 +226,9 @@ class UniVTACTactileApi(ApiBase):
                 f"Server returned HTTP {e.response.status_code} for GET {path}.\n"
                 f"Server response: {detail}"
             )
-        return r.json()
+        data = r.json()
+        self._note_step(data)
+        return data
 
     # ------------------------------------------------------------------
     # Motion API
@@ -359,13 +260,9 @@ class UniVTACTactileApi(ApiBase):
                 target, then descends to the requested pose. Default is 0.0.
 
         Returns:
-            dict with the scalar tactile readings after the move, per side:
-            contact, depth_mm, marker_displacement_px, marker_shear_dx,
-            marker_shear_dy, marker_coherence and marker_anisotropy, plus
-            ``step`` — the physics ticks the episode has advanced, 120 of
-            them per second.  A move spends whatever the planned trajectory
-            ran, at least ten ticks and about forty for a short one, so the
-            length of a hold is the difference between two ``step`` reads.
+            dict with: step (int — physics ticks since reset, 120 per
+            simulated second; use it to measure how long a motion took or
+            to time a hold).
         """
         data = self._post(
             "/move",
@@ -379,7 +276,7 @@ class UniVTACTactileApi(ApiBase):
         print(f"Moved to position={np.round(position, 3)} "
               f"quat_w={quaternion_wxyz[0]:.3f} z_approach={z_approach}"
               + _settled_note(data))
-        return _trim_motion_tactile(data.get("tactile", {}))
+        return {"step": _step_from(data)}
 
     def move_delta(
         self,
@@ -413,19 +310,13 @@ class UniVTACTactileApi(ApiBase):
                 about the end-effector itself and its position is left alone.
 
         Returns:
-            dict with the scalar tactile readings after the move (same set as
-            goto_pose: contact, depth, displacement, shear, coherence and
-            anisotropy per side).
+            dict with: step (int — physics ticks since reset).
         """
         data = self._post(
             "/move_delta",
             {
-                "dx": float(dx),
-                "dy": float(dy),
-                "dz": float(dz),
-                "drx": float(drx),
-                "dry": float(dry),
-                "drz": float(drz),
+                "dx": float(dx), "dy": float(dy), "dz": float(dz),
+                "drx": float(drx), "dry": float(dry), "drz": float(drz),
                 "coord": coord,
                 "tag": "move_delta",
             },
@@ -433,7 +324,7 @@ class UniVTACTactileApi(ApiBase):
         print(f"Moved delta: dx={dx:.3f} dy={dy:.3f} dz={dz:.3f} "
               f"drx={drx:.3f} dry={dry:.3f} drz={drz:.3f} coord={coord}"
               + _settled_note(data))
-        return _trim_motion_tactile(data.get("tactile", {}))
+        return {"step": _step_from(data)}
 
     def move_reflexive(
         self,
@@ -446,37 +337,16 @@ class UniVTACTactileApi(ApiBase):
 
         The fast loop runs INSIDE the motion: the server evaluates tactile
         events on every simulation step and freezes the arm at the first
-        enabled one, so you do not need to poll between small steps.  Use it
-        instead of a slow while-loop of move_delta calls for contact-
-        critical motions: approach until first touch, insert until seated,
-        press until jammed, hold-and-check for slip.
-
-        Limits per call are the same as move_delta (max 0.10 m translation
-        per axis, max 0.5 rad rotation, target Z >= 0).  Each step needs a
-        full render (~2 FPS with the reflex active), so keep deltas <=
-        0.05 m per call and expect the call to take longer than move_delta.
+        enabled one.
 
         stop_on keys (all ORed; a key absent from the dict stays disabled):
             contact=True         stop when either fingertip touches
-                                 (depth < ~34 mm far plane)
             hard_depth=<mm>      stop when either depth <= threshold
-                                 (20.0 default = hard jam)
-            shear_spike=<px>     stop when per-step marker displacement
-                                 GROWS >= threshold (2.0 default) with
-                                 coherence >= 0.7 (friction event)
+            shear_spike=<px>     stop when per-step marker displacement grows
             slip=<deg>           stop when the shear direction turns >= deg
-                                 between steps (30.0 default; direction
-                                 aware — the improvement over detect_slip)
             asymmetry=<mm>       stop when |L_depth - R_depth| >= mm
-                                 (3.0 default; yaw misalignment)
             plateau={"mm":0.5,"steps":5}  stop when contact is flat
-                                 (depth change < mm over N steps; jammed or
-                                 seated signal)
             max_steps=<n>        safety net: stop after n evaluations
-
-        Success means "reached the target OR stopped on a condition" —
-        always check terminated_by in the return to know which.  The motion
-        never retries after a reflex trigger.
 
         Args:
             dx: (float) X translation in meters.
@@ -485,29 +355,18 @@ class UniVTACTactileApi(ApiBase):
             drx: (float) X rotation in radians.
             dry: (float) Y rotation in radians.
             drz: (float) Z rotation in radians.
-            coord: ("world" or "ee") Reference frame for the whole delta,
-                rotation included; see move_delta.
+            coord: ("world" or "ee") Reference frame; see move_delta.
             stop_on: (dict) Conditions to stop on (see above).
 
         Returns:
-            dict with tactile (the scalar readings per side: contact, depth,
-            displacement, shear, coherence, anisotropy),
-            terminated_by (the event
-            that stopped the motion, or None if it completed) and event
-            (the full digest: max_shear_px, shear_dir_deg, asymmetry_mm,
-            min_depth_mm, contact_step, events, steps, callback_error).
-            The same 2 mm / 0.02 rad per-call minimum as move_delta applies:
-            a delta below it on every axis cannot be executed and raises.
+            dict with: step (int), terminated_by (event that stopped the
+            motion, or None), event (full digest).
         """
         data = self._post(
             "/move_reflexive",
             {
-                "dx": float(dx),
-                "dy": float(dy),
-                "dz": float(dz),
-                "drx": float(drx),
-                "dry": float(dry),
-                "drz": float(drz),
+                "dx": float(dx), "dy": float(dy), "dz": float(dz),
+                "drx": float(drx), "dry": float(dry), "drz": float(drz),
                 "coord": coord,
                 "tag": "move_reflexive",
                 "stop_on": stop_on,
@@ -517,277 +376,137 @@ class UniVTACTactileApi(ApiBase):
         term = event.get("terminated_by")
         print(f"Reflexive move: dx={dx:.3f} dy={dy:.3f} dz={dz:.3f} "
               f"terminated_by={term}")
-        return {
-            "tactile": _trim_motion_tactile(data.get("tactile", {})),
-            "terminated_by": term,
-            "event": event,
-        }
+        return {"step": _step_from(data), "terminated_by": term, "event": event}
 
     def open_gripper(self) -> dict:
         """Open the gripper fully.
 
         Returns:
-            dict with the scalar tactile readings after opening (same set as
-            goto_pose).
+            dict with: step (int — physics ticks since reset).
         """
         data = self._post("/gripper", {"action": "open"})
         print("Gripper opened")
-        return _trim_motion_tactile(data.get("tactile", {}))
+        return {"step": _step_from(data)}
 
-    def close_gripper(self, force_threshold: float | None = None,
-                      position: float | None = None,
-                      adaptive: bool | None = None) -> dict:
-        """Close the gripper to grasp an object. Uses tactile feedback to stop
-        at the requested gel deformation depth.
+    def close_gripper(self, position: float) -> dict:
+        """Close the gripper to a commanded finger opening.
 
-        force_threshold is a gel-depth target in mm, where depth DECREASES as
-        contact hardens (see get_tactile_data).  Lower values grip firmer.
-
-        With adaptive=True the close is judged by the gel depth it reached, so
-        a close that meets nothing never reaches the target and raises
-        "Gripper action failed" instead of returning a far-plane reading.
-        That is the default for a close that names a depth, and it is why a
-        close that names only an opening runs the travel command instead.
-        adaptive=False commands the finger travel directly: a close
-        that meets nothing returns the far-plane reading, and one an object
-        stops short of the commanded opening raises, the message carrying the
-        opening it landed on.  A raise is not a lost reading: the fingers stay
-        where the object stopped them, and get_tactile_data returns what the
-        pads see at that stopping point.
+        The opening is a fraction of the pads' full 0.08 m travel: 1.0 is fully
+        open, 0.5 puts the pad faces 40 mm apart, and a smaller number presses
+        the pads into the object.  This arm's close is positional: it has no
+        gel-depth target, because the depth servo is the scalar tactile
+        layer's channel and the text arm reads the gel only as text.  Size the
+        opening from the object's own width, or from the scene's published
+        geometry.
 
         Args:
-            force_threshold: (float, optional) Target gel deformation depth in
-                mm. Lower values = firmer/deeper grip. Below ~26.5 mm the depth
-                is one the servo can never reach on a compliant object, and the
-                close fails outright rather than stopping short. An explicit
-                value switches the close to a servoed landing: the fingers
-                micro-step onto the target and the released depth comes back
-                close to it — not exactly: 26.23, 26.32 and 26.68 were
-                measured around a 26.5 target — so check the reading against a
-                narrow band rather than one exact value. It gives up on an
-                asymmetric or wedged grasp, where the fingers stop wherever
-                they jammed. None uses the task default (firm), which is not
-                servoed, lands near 25.5 mm and varies from one close to the
-                next.
-            position: (float, optional) Gripper opening percentage, 0.0 (fully
-                closed) to 1.0 (fully open). Sets the grip by finger separation
-                instead of by gel depth, which fixes the grip only where the
-                object is rigid enough for the fingers to pin it. None leaves
-                the travel unconstrained (closes fully).
-            adaptive: (bool) Whether the depth servo runs during the close.
-                True drives towards force_threshold. False commands the finger
-                travel directly, so it goes exactly where it is told whatever
-                the object does. Omitted, it is True unless a position was
-                given: a position close is a travel command by definition, and
-                running the depth servo alongside it would stop the fingers on
-                the gel reading while the opening stayed wherever they happened
-                to be.
+            position: (float) Gripper opening, 0.0 (fully closed) to 1.0
+                (fully open).
 
         Returns:
-            dict with the scalar tactile readings after closing (same set as
-            goto_pose).
+            dict with: step (int — physics ticks since reset).
         """
-        if adaptive is None:
-            adaptive = position is None
-        payload: dict = {"action": "close", "use_adaptive_grasp": adaptive}
-        if force_threshold is not None:
-            payload["force_threshold"] = force_threshold
-        if position is not None:
-            payload["position"] = position
-        data = self._post("/gripper", payload)
+        data = self._post("/gripper", {
+            "action": "close",
+            "use_adaptive_grasp": False,
+            "position": float(position),
+        })
         print("Gripper closed")
-        return _trim_motion_tactile(data.get("tactile", {}))
+        return {"step": _step_from(data)}
 
     # ------------------------------------------------------------------
-    # Tactile sensing API
+    # Tactile description API  (replaces the scalar tactile layer)
     # ------------------------------------------------------------------
 
-    def get_tactile_data(self) -> dict:
-        """Read the GelSight Mini tactile sensors without moving.
+    def describe_tactile(
+        self,
+        side: str = "both",
+        prompt: str = (
+            "Describe the object in the following tactile video(s)."
+        ),
+    ) -> dict:
+        """Describe what the fingertip gel(s) currently feel using text.
 
-        The readings are the same scalar set every motion primitive returns —
-        this is the read that costs no motion.  The marker images are not
-        returned by this call, only the scalars listed below.
+        Fetches the current GelSight gel image(s) from the UniVTAC server and
+        sends them to the Octopi-1.5 visual-tactile language model, which
+        returns a natural-language description of the surface texture and
+        compliance.
 
-        Every numeric field below falls back to 0.0 when its sensor did not
-        report.  0.0 is out of range for all of them, so a 0.0 means the
-        reading is MISSING, not that it is zero — and a missing pad is not a
-        zero pad: a dead left gel returns depth 0.0, which is past the hard
-        stop and would read as the firmest grip on the scale if taken at face
-        value.  Pair it with the contact flag, which is False on that same
-        pad.  (marker_anisotropy is the exception: it comes back as None when
-        there is no image to read.)
+        Call this at DECISION POINTS only — each call triggers a full gel
+        render on the sim server (~0.5 s) and an Octopi inference (~1–2 s).
+        Do not call it inside motion loops.
 
-        Returns:
-            dict with: step (int — physics ticks since the episode was reset,
-            at 120 per simulated second.  This call does not advance it, so
-            it is the clock as it stands: two reads around a motion say how
-            long that motion took, and a read before a hold is the start of
-            it); left_contact, right_contact (bool — a RANGE flag, not
-            a press: true as soon as any surface is inside the sensor's range,
-            which happens while the depth is below the far plane and the
-            surface can still be up to ~5.6 mm short of the gel face.  Both
-            up does not by itself mean the pads are touching the object);
-            left_depth_mm, right_depth_mm (float, distance from the sensor to
-            the nearest surface — 34 mm is the far plane (nothing in range);
-            the gel's own face sits at ~28.3 mm undeformed, so a reading above
-            that is a surface that has NOT reached the pad and one below it is
-            pressed into the gel.  The reading DECREASES as contact hardens:
-            ~27.8-29 mm is the gel-face band, where a light grasp and a
-            close that met nothing both read — the contact flags are up in
-            either case, and only the marker displacement separates them
-            (under 0.01 px for the empty close; a real grasp moves them
-            1.5 px or more.  A pad that has touched nothing still reports a
-            few thousandths of a pixel, so test a threshold — anything
-            above ~1 px is contact — and never "nonzero") — ~24 mm is the
-            sensor's floor (the camera's window ends there), and the reading
-            saturates there.  Returning to 34 mm
-            means the pads are
-            open, which is the same reading whether the object was never held,
-            was set down, or was dropped — the field answers whether something
-            is inside the sensor's range, never where it went);
-            left_marker_displacement_px, right_marker_displacement_px (float,
-            mean absolute marker displacement since the no-contact baseline —
-            a magnitude, so it responds to any gel deformation, not only slip);
-            left_marker_coherence, right_marker_coherence (float, 0-1
-            uniformity of marker motion — high when markers move together
-            (shear/slip), low when they move incoherently (compression/
-            deformation or tracking loss).  It is a ratio of common motion
-            to motion overall, not a measure of how far the markers went:
-            0.0 to 0.8 is ordinary on a pad that barely moved, whether at
-            rest right after a close or on a turn that slid it almost
-            nothing, and grasps that go on to work have read it there; a
-            pad dragged a long way through the gel has come back at 0.9 or
-            more);
-            left_marker_shear_dx, left_marker_shear_dy, right_marker_shear_dx,
-            right_marker_shear_dy (float, pixels, in the marker image's own
-            frame: the mean marker displacement VECTOR since the no-contact
-            baseline — the part of the marker motion that the whole patch
-            shares, so the direction is kept: a load hanging off the gel drags
-            every marker one way (shear grows), while a uniform squeeze pushes
-            them outward and its mean cancels.  The two sensors are mounted
-            mirrored, so the SAME physical slide appears with OPPOSITE sign on
-            the two pads);
-            left_marker_anisotropy, right_marker_anisotropy (float, the
-            row-to-row gradient of the marker image divided by its
-            column-to-column gradient: 1.0 when the gel deforms evenly in every
-            direction, higher when the deformation has horizontal structure);
-            left_height_roughness_mm, right_height_roughness_mm (float, mm,
-            RMS fine relief of the gel's indentation map after a smooth
-            quadratic contact envelope is fitted and removed: the imprint of a
-            sphere is a clean cap, while a raised surface leaves its bumps in
-            the gel.  Every field above is an average over the gel, so it
-            grows with how hard the pad is pressed; this one does not — at the
-            same squeeze a smooth ball reads 0.02-0.03 mm and a dotted one
-            0.09-0.25 mm while the pads sit on its centre — so it answers
-            what the surface is shaped like rather than how hard it is
-            pressed, as long as the imprint is still the object's own
-            surface: a pad that keeps closing on a compliant object measures
-            the crush.  Reported only where the
-            fingertip exposes a full height map; absent from the response
-            otherwise.)
-        """
-        data = self._get("/tactile")
-        # The server computes the marker anisotropy from the same uint8 array
-        # its PNG payload carries.  Derive it here only when the response has
-        # none, so an older server loses no reading over it.
-        for side in ("left", "right"):
-            key = f"{side}_marker_anisotropy"
-            if data.get(key) is None:
-                data[key] = _marker_anisotropy(data.get(f"{side}_rgb_base64", ""))
-        tactile_trace.record("/tactile", data)
-        # Print summary only (skip base64 images to keep logs readable)
-        relief = ""
-        if data.get("left_height_roughness_mm") is not None:
-            relief = (" L_relief=%.3fmm R_relief=%.3fmm"
-                      % (data["left_height_roughness_mm"],
-                         data["right_height_roughness_mm"]))
-        print(f"Tactile: L_contact={data['left_contact']} R_contact={data['right_contact']} "
-              f"L_depth={data['left_depth_mm']:.2f}mm R_depth={data['right_depth_mm']:.2f}mm "
-              f"L_disp={data['left_marker_displacement_px']:.2f}px "
-              f"R_disp={data['right_marker_displacement_px']:.2f}px "
-              f"L_coh={data['left_marker_coherence']:.2f} "
-              f"R_coh={data['right_marker_coherence']:.2f} "
-              f"L_shear=({_fmt(data.get('left_marker_shear_dx'))},"
-              f"{_fmt(data.get('left_marker_shear_dy'))})px "
-              f"R_shear=({_fmt(data.get('right_marker_shear_dx'))},"
-              f"{_fmt(data.get('right_marker_shear_dy'))})px "
-              f"L_aniso={_fmt(data.get('left_marker_anisotropy'))} "
-              f"R_aniso={_fmt(data.get('right_marker_anisotropy'))}{relief}")
-        # Strip images before returning to avoid huge logs
-        return {k: v for k, v in data.items() if "base64" not in k}
-
-    def get_tactile_image(self, side: str = "left") -> np.ndarray | None:
-        """Return the GelSight marker-view image of one fingertip as RGB.
-
-        The image shows the marker grid printed on the gel — the raw visual
-        signal behind the displacement/coherence scalars.  Call it only at
-        DECISION POINTS: every call is a full render (~0.5 s), so never
-        fetch it mid-motion.  Save it to scratch/ and inspect it like a
-        camera image (crop and upscale regions of interest, as with zoom).
+        Typical description vocabulary: hard/soft, rough/smooth/textured,
+        bumpy, flexible, sticky.
 
         Args:
-            side: ("left" or "right") Which fingertip to read.
+            side: ("left", "right", or "both") Which fingertip to read.
+                "both" concatenates the two descriptions separated by " | ".
+            prompt: (str) Instruction sent to Octopi. Default asks for a
+                free description.  For a forced choice, ask the question
+                and name the alternatives.
 
         Returns:
-            (H, W, 3) uint8 array of the marker-view image, or None when
-            the image is unavailable.
+            dict with:
+            step (int — physics ticks since reset, same clock as motion
+                primitives);
+            description (str — Octopi's text description of the surface;
+                empty string when the Octopi service is unavailable);
+            octopi_seconds (float — wall-clock time inside the Octopi service,
+                for latency accounting; 0.0 on fallback).
         """
-        data = self._get("/tactile")
-        b64 = data.get(f"{side}_rgb_base64", "")
-        if not b64:
-            return None
-        img = Image.open(io.BytesIO(base64.b64decode(b64)))
-        arr = np.asarray(img.convert("RGB"), dtype=np.uint8)
-        print(f"Tactile image ({side}): {arr.shape}")
-        return arr
+        raw = self._get("/tactile")
+        step = raw.get("step", 0)
 
-    def detect_slip(
-        self, threshold_px: float = 2.0, coherence_threshold: float = 0.7
-    ) -> bool:
-        """Check whether the grasped object is slipping.
+        sides_to_read = (["left", "right"] if side == "both" else [side])
+        descriptions: list[str] = []
+        total_secs = 0.0
 
-        Slip is judged on how much the marker displacement has GROWN since the
-        previous call: a real slip or jam shears the markers further in a
-        uniform direction, so the displacement increases by more than
-        threshold_px while coherence stays high.  A steady grasp — even one
-        that already slipped earlier — does not re-report.  The FIRST call
-        only establishes the reference reading (returns False), so the very
-        first motion after it is never judged.
+        for s in sides_to_read:
+            b64 = raw.get(f"{s}_rgb_base64", "")
+            if not b64:
+                descriptions.append(f"({s} gel image unavailable)")
+                continue
+            desc, secs = self._octopi_describe(b64, prompt)
+            descriptions.append(f"{s}: {desc}" if side == "both" else desc)
+            total_secs += secs
 
-        Args:
-            threshold_px: (float) Minimum displacement GROWTH in pixels since
-                the previous call.  1.0 = sensitive, 5.0 = tolerant.
-            coherence_threshold: (float) Minimum marker coherence (0-1) for a
-                displacement to count as slip.  ~0.7 separates uniform shear
-                (slip) from compression/deformation.
+        description = " | ".join(descriptions) if side == "both" else descriptions[0]
+        print(f"Tactile description ({side}): {description[:120]}")
+        return {
+            "step": step,
+            "description": description,
+            "octopi_seconds": round(total_secs, 2),
+        }
 
-        Returns:
-            bool, True if the object is slipping.
+    def _octopi_describe(self, b64: str, prompt: str) -> tuple[str, float]:
+        """POST one gel-image base64 to the Octopi service.
+
+        Falls back to an empty string if the service is unreachable so that a
+        downed Octopi process does not crash the trial.
         """
-        data = self._get("/tactile")
-        left_disp = float(data.get("left_marker_displacement_px", 0.0))
-        right_disp = float(data.get("right_marker_displacement_px", 0.0))
-        left_coh = float(data.get("left_marker_coherence", 0.0))
-        right_coh = float(data.get("right_marker_coherence", 0.0))
-        if self._slip_baseline is None:
-            # First call: only establish the reference reading.
-            self._slip_baseline = (left_disp, right_disp)
-            print(f"Slip baseline set: L={left_disp:.2f}px R={right_disp:.2f}px")
-            return False
-        last_left, last_right = self._slip_baseline
-        d_left = left_disp - last_left
-        d_right = right_disp - last_right
-        self._slip_baseline = (left_disp, right_disp)
-        left_slip = d_left > threshold_px and left_coh > coherence_threshold
-        right_slip = d_right > threshold_px and right_coh > coherence_threshold
-        result = left_slip or right_slip
-        if result:
-            print(
-                f"Slip detected! (dL={d_left:+.2f}px/{left_coh:.2f} "
-                f"dR={d_right:+.2f}px/{right_coh:.2f})"
+        t0 = time.monotonic()
+        try:
+            r = requests.post(
+                f"{self._octopi}/describe",
+                json={"frames": [b64], "prompt": prompt, "max_new_tokens": 150},
+                timeout=_OCTOPI_TIMEOUT,
             )
-        return result
+            r.raise_for_status()
+            text = r.json().get("text", "")
+            secs = time.monotonic() - t0
+            # Strip the "Object 1:" prefix Octopi may prepend
+            text = text.split("Object 1:")[-1].strip()
+            text = text.split("\n")[0].strip()
+            # Octopi was trained on multi-object scenes; a single gel frame
+            # still makes it continue into a hallucinated "Object 2:" of the
+            # same surface.  Keep only the object actually on the gel.
+            text = re.split(r"\bobject\s*2\b", text, maxsplit=1, flags=re.I)[0].strip()
+            return text, secs
+        except Exception as exc:
+            secs = time.monotonic() - t0
+            print(f"  [Octopi unavailable: {exc}]")
+            return "", secs
 
     # ------------------------------------------------------------------
     # Perception API
@@ -805,6 +524,13 @@ class UniVTACTactileApi(ApiBase):
         rule exists the pose is rebuilt from the object's pose on every call
         rather than cached, so it follows the object after it has been moved or
         re-grasped, and the FIRST-call caveat above does not apply.
+
+        The cached offset is only meaningful for the object the hand was left
+        above (the one the pre-move anchored).  For any other object it is the
+        hand's own position rather than that object's grasp, so the returned
+        pose lands wherever the hand happens to be.  Build such a grasp from a
+        measured offset instead: grasp_pos = object_pos + offset, with offset
+        taken from a real grasp (grasp_pos - object_pos).
 
         Args:
             object_name: The simulator PRIM name of the object (e.g.
@@ -839,49 +565,20 @@ class UniVTACTactileApi(ApiBase):
         about 3 deg, whichever is larger).
         Given, zero included, each step is one differential-IK iteration that
         turns the object by angle_rad / steps and advances the hand by the
-        matched feed; the twist and the advance stay locked together.  This
-        servo path needs the task's own _ik_to_center servo — without it the
-        call is refused.
-
-        One servo iteration carries about 4.6 deg of joint motion, so a step
-        count too coarse for the angle is raised rather than refused:
-        "requested" can exceed the number passed.  An unreachable target (a
-        wrist limit, say) refuses the call, and that refusal latches the
-        task's failure flag for the rest of the episode.
-
-        A twist the servo can carry but that contact stops raises as well: the
-        call ends with an error when the pads reach 128 N of normal force, the
-        torque passes the task's over-torque limit, the axial load on the
-        part's stop passes 180 N, the grasp drifts past 4 mm or tilts past
-        10 deg, or the task is already in a latched failure.  An errored call
-        is not a no-op: the stop is noticed at the end of an iteration, after
-        the step that ran into it, so that step's effect on the part stands
-        however few turns the call reports.  Only a servo refusal is decided
-        before its own iteration is stepped, and unlike those stops it latches
-        nothing by itself.
+        matched feed; the twist and the advance stay locked together.
 
         Args:
             object_name: The name of the object being held.
             angle_rad: (float) Total rotation angle in radians.
-            steps: (int) Number of increments to split the rotation into —
-                planner sub-moves without a lead, servo iterations with one,
-                each carrying angle_rad / steps of the twist.
-            feed_lead_m: (float) Axial advance per full turn, in metres.  Its
-                sign does not follow angle_rad: a positive lead descends the
-                hand, a negative one lifts it, whichever way the twist goes.
-                Zero rolls the hand in place on the servo; omitted rotates it
-                in place on the planner instead.
+            steps: (int) Number of increments to split the rotation into.
+            feed_lead_m: (float) Axial advance per full turn, in metres.
 
         Returns:
-            dict with the scalar tactile readings after the rotation (same set
-            as goto_pose).  With feed_lead_m given, a "helix" entry is added:
-            completed / requested (servo iterations run, and the count run
-            after any raise), feed_lead_m (the lead this call twisted along),
-            reached (bool — the feed servo reached its terminal condition: the
-            part has taken its full travel and is loaded on its stop),
-            aborted (always None in a returned dict — a stopped call raises
-            instead, with the stop in the message), grip_released (bool) and
-            trace (the per-iteration record).
+            dict with: step (int — physics ticks since reset).  With
+            feed_lead_m given, a "helix" entry is added: completed /
+            requested (servo iterations run), feed_lead_m, reached (bool),
+            aborted (always None in a returned dict), grip_released (bool)
+            and trace (the per-iteration record).
         """
         payload: dict[str, Any] = {
             "object_name": object_name, "angle_rad": angle_rad, "steps": steps,
@@ -889,24 +586,24 @@ class UniVTACTactileApi(ApiBase):
         if feed_lead_m is not None:
             payload["feed_lead_m"] = feed_lead_m
         data = self._post("/rotate_gripper", payload)
+        step = _step_from(data)
         if feed_lead_m is None:
             print(f"Rotated gripper holding '{object_name}' by {angle_rad:.2f} rad "
                   f"in {steps} steps")
-            return _trim_motion_tactile(data.get("tactile", {}))
-        readings = _trim_motion_tactile(data.get("tactile", {}))
-        readings["helix"] = {
-            "feed_lead_m": data.get("feed_lead_m"),
-            "completed": data.get("completed"),
-            "requested": data.get("requested"),
+            return {"step": step}
+        result: dict = {"step": step, "helix": {
+            "feed_lead_m":   data.get("feed_lead_m"),
+            "completed":     data.get("completed"),
+            "requested":     data.get("requested"),
             "grip_released": data.get("grip_released"),
-            "aborted": data.get("aborted"),
-            "reached": data.get("reached"),
-            "trace": data.get("trace"),
-        }
+            "aborted":       data.get("aborted"),
+            "reached":       data.get("reached"),
+            "trace":         data.get("trace"),
+        }}
         print(f"Twisted '{object_name}' along lead {feed_lead_m * 1000:.3f} mm: "
               f"{data.get('completed')}/{data.get('requested')} iterations, "
               f"{'seated' if data.get('reached') else 'stopped: ' + str(data.get('aborted')) if data.get('aborted') else 'OK'}")
-        return readings
+        return result
 
     def check_success(self) -> bool:
         """Check whether the task is complete. Call at the end of the code to
@@ -942,11 +639,14 @@ class UniVTACTactileApi(ApiBase):
         the half-extent.
 
         Args:
-            object_name: The name of the object to get the pose of (prefix
-                matches, e.g. "prism").
+            object_name: The name of the object to get the pose of — the
+                scene's PRIM name, verbatim (prefix or substring matches,
+                e.g. "prism"; when several match, the one nearest the
+                workspace wins).  Spaces are not part of any name: pass
+                "orange_pad", never "orange pad".
             return_bbox_extent: Whether to fill in bbox_extent, the third return
-                value, with the full 3D bounding-box size. Default is False, in
-                which case bbox_extent comes back as None.
+                value, with the full 3D bounding-box size. Default is False,
+                in which case bbox_extent comes back as None.
 
         Returns:
             Three values, always - the tuple is never shortened:
@@ -978,31 +678,11 @@ class UniVTACTactileApi(ApiBase):
         return position, quat, bbox
 
     # ------------------------------------------------------------------
-    # Agent-facing observation (NOT part of the cap-x LLM API)
+    # Agent-facing helpers (NOT in functions() — not shown in LLM prompt)
     # ------------------------------------------------------------------
 
     def get_observation(self, include_depth: bool = True) -> dict:
-        """Return the current head/wrist camera images for interactive agents.
-
-        Agent-facing only: this method is intentionally NOT listed in
-        ``functions()``, so it never appears in the generated LLM prompt and
-        is not bound in the exec sandbox.  It exists for coding agents that
-        drive the arm interactively (see ``univtac_skill/robo.py``).
-
-        Args:
-            include_depth: (bool) Also decode the metric depth maps (float32
-                metres). Default True.
-
-        Returns:
-            dict with ``head_rgb`` / ``wrist_rgb``: (H, W, 3) uint8 numpy
-            arrays (None if unavailable), and ``head_depth`` / ``wrist_depth``:
-            (H, W) float32 metres (None if include_depth is False or the
-            camera is unavailable).  ``{cam}_intrinsics`` /
-            ``{cam}_cam_pos_w`` / ``{cam}_cam_quat_w_ros`` for both head and
-            wrist: camera calibration passed through from the server (None if
-            the server does not provide it) — needed by the perception
-            back-projection.
-        """
+        """Return the current head/wrist camera images for interactive agents."""
         data = self._get("/observation")
         result: dict = {}
         for cam in ("head", "wrist"):
@@ -1012,7 +692,6 @@ class UniVTACTactileApi(ApiBase):
                 result[f"{cam}_rgb"] = np.asarray(img.convert("RGB"), dtype=np.uint8)
             else:
                 result[f"{cam}_rgb"] = None
-
             depth = None
             if include_depth:
                 depth_b64 = data.get(f"{cam}_depth_float32_base64", "")
@@ -1022,16 +701,9 @@ class UniVTACTactileApi(ApiBase):
                         base64.b64decode(depth_b64), dtype=np.float32
                     ).reshape(shape[0], shape[1])
             result[f"{cam}_depth"] = depth
-
-        # Camera calibration (needed for perception back-projection); passed
-        # through from the server response, unchanged.  Both cameras — head
-        # and wrist — so that get_object_pose(camera="wrist") can back-project
-        # (previously only the head keys were parsed, and wrist queries failed
-        # with "calibration unavailable").
         for cam in ("head", "wrist"):
             for key in (f"{cam}_intrinsics", f"{cam}_cam_pos_w", f"{cam}_cam_quat_w_ros"):
                 result[key] = data.get(key)
-
         shapes = ", ".join(
             f"{cam}="
             + (str(result[f"{cam}_rgb"].shape) if result[f"{cam}_rgb"] is not None else "None")
@@ -1041,26 +713,5 @@ class UniVTACTactileApi(ApiBase):
         return result
 
     def get_ee_pose(self) -> dict:
-        """Return the end-effector pose in the world frame.
-
-        Agent-facing only: this method is intentionally NOT listed in
-        ``functions()``, so it never appears in the generated LLM prompt and
-        is not bound in the exec sandbox.  It exists for coding agents that
-        drive the arm interactively (see ``univtac_skill/robo.py``).
-
-        Diagnostic use only: verify that a commanded move_delta actually
-        executed (execution state != world state), detect drift from a
-        known-good pose, and re-anchor before a precise descent.  Do NOT use
-        it for object alignment — ``goto_pose`` plans in the same frame this
-        returns, and object perception (SAM3) is far noisier than the arm
-        kinematics, so aligning to the perception through this adds no
-        precision.
-
-        Args:
-            None.
-
-        Returns:
-            dict with ``position``: [x, y, z] metres and ``quaternion_wxyz``:
-            [w, x, y, z], both in the world frame.
-        """
+        """Return the end-effector pose in the world frame (agent-facing only)."""
         return self._get("/ee_pose")

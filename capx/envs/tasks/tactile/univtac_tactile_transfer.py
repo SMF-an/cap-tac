@@ -38,10 +38,10 @@ def contacts_ok(fb):
 def grasp_object(obj_name, grasp_pos, grasp_quat):
     \"\"\"Approach a grasp pose and close on the object; return (ok, offsets).\"\"\"
     goto_pose(grasp_pos, grasp_quat, z_approach=0.06)
-    fb = close_gripper()
+    fb = close_gripper(position=0.45)
     if not contacts_ok(fb):
         open_gripper()
-        fb = close_gripper(force_threshold=25.0)
+        fb = close_gripper(position=0.45)
     pos, _, _ = get_object_pose(obj_name)
     # EE offset relative to the object centre while held (get_ee_pose is not
     # available in the eval sandbox, so derive it from the grasp pose).

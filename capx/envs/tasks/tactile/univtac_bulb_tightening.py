@@ -12,18 +12,31 @@ The bulb starts already threaded into its socket, and it is a thread: turning
 is the only thing that takes it deeper. Pushing it down does not move it - the
 push is taken by the glass and the pads instead, and it stays there.
 
-The fingertips are the instrument, not a safety net. The bulb is smooth glass
-and the pads are the only thing that touches it, so every question this task
-asks is answerable from them, and that is where the answers should come from:
+The pads are the only judge: which way the thread turns in, what feed matches
+it, how deep it has gone, and where it bottoms out.  Read them after the close,
+after each direction leg, and after each block.  On the glass both pads name a
+surface; a pad that has slipped describes nothing.
 
-- Which way is in. Take the direction from separate legs; how long each leg
-  must be, and how far apart they have to come before you believe them, are in
-  the tactile skills at the end of this prompt.
-- How fast to descend. The lead is not given either, and it varies with the
-  bulb, so it has to be measured rather than assumed - and the pads are what
-  measure it. The skills below give the method.
-- Whether it is in. The seat is a reading, not a count of turns, and the skills
-  below say when it can be believed.
+Direction: run a short leg each way.  One direction takes the thread with it
+and the other lets the glass slide under the pad, and only the pads can say
+which is which.  Never settle the direction from the bulb's pose - not its yaw,
+not its height.
+
+Lead: a thread descends once per turn, so the feed you command has to be that
+descent; any difference is shear between the pad and the glass, and that is
+what the pads describe.  Start from a nominal lead, read the pads in the same
+block, and correct the feed until a block turns without the surface moving
+under the pad.  The lead varies with the bulb - find it on this bulb; do not
+assume it and do not read it off the pose.  Every rotate call carries a feed,
+the first included - without it the call runs the planner's path, which a
+thread refuses.
+
+Depth is your own tally: the feed you commanded at a matched lead, times the
+turns you turned.  The seat is where the pads stop reporting the thread taking
+the glass while the turns still accumulate - not a count of turns and not a
+pose reading.  A grip that releases during a block, or a block the pads
+describe as slipping, is one re-grasp, not the end: open, re-approach in one
+call, close firmer at 0.40, and carry on.
 
 The wrist runs out of range soon after a third of a turn, so a full insertion
 is several segments with the hand re-set in between. Going past that range is
@@ -313,7 +326,7 @@ def close_on_bulb():
     path, and that lift is gone (see unwind).  The environment's own expert does
     the same (bulb_tightening.py:1878-1885).
     \"\"\"
-    depth = pad_depth(close_gripper(force_threshold=GRIP_DEPTH_MM, adaptive=True))
+    depth = pad_depth(close_gripper(position=0.42))
     print(f"  close: pad depth {depth:.2f} mm (target {GRIP_DEPTH_MM})")
     return depth < GRIP_TOOK_MM
 
@@ -795,31 +808,12 @@ class UniVTACBulbTighteningPerceptionCodeEnv(UniVTACBulbTighteningCodeEnv):
     """
 
     tactile_skills = (
-        # act -- everything routed to the bulb except bulb-grasp-pose
-        "bulb-close-force",
-        "descent-until-contact",
+        # everything routed to the bulb except bulb-grasp-pose (the
+        # perception line cannot honour its ground-truth recipe)
         "feed-must-match-lead",
-        "lattice-pitch-budget",
-        "lead-by-overshoot",
-        "mirrored-shear-slide",
         "one-call-approach",
         "preserve-existing-grasp",
-        "reflex-stop-on-events",
-        "seat-by-slide-collapse",
-        "small-step-insertion",
-        "thread-direction-by-legs",
         "wrist-limit-segmentation",
-        # protocol
-        "channel-selection",
-        "differential-across-states",
-        "grasp-verification",
-        "no-absolute-without-reference",
-        "regrasp-after-slip",
-        "tactile-cannot-locate",
-        # sense
-        "confidence-gate",
-        "contact-flag-is-range",
-        "depth-grip-scale",
-        "shear-vs-displacement",
-        "slip-pair-baseline",
+        "bulb-pose-gauge",
+        "bulb-close-position",
     )

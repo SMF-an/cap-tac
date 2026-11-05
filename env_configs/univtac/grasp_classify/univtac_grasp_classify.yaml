@@ -19,5 +19,17 @@ api_servers:
 record_video: true
 output_dir: ./outputs/univtac_grasp_classify
 
-trials: 100
+trials: 40
 num_workers: 1  # Isaac Sim is not parallel-safe
+# Continue forward instead of rerunning: seeds are trial numbers, so the next
+# batch continues at seed 21.  Remove this line to start again from seed 1.
+resume_idx: 25
+
+use_visual_feedback: true
+# Ask a VLM to describe the initial scene, appended to the prompt right after
+# the image sentence.  Same model as the code generator here: the gpt-6 line
+# is served by the local proxy, which is the only endpoint that speaks
+# /responses for these names.
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions

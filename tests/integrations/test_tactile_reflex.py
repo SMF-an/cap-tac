@@ -34,12 +34,22 @@ from pydantic import ValidationError
 
 from capx.integrations.tactile.univtac_api import (
     UniVTACTactileApi,
-    _MOTION_TACTILE_FIELDS,
-    _marker_anisotropy,
-    _trim_motion_tactile,
 )
 from capx.serving import launch_univtac_server as S
 from capx.serving import tactile_reflex as tr
+
+# Local copy of the scalar field names — the API no longer exports them
+# (this branch replaces scalars with Octopi text), but several tests below
+# check server-side schemas that still carry them.
+_MOTION_TACTILE_FIELDS = (
+    "step", "left_contact", "right_contact",
+    "left_depth_mm", "right_depth_mm",
+    "left_marker_displacement_px", "right_marker_displacement_px",
+    "left_marker_coherence", "right_marker_coherence",
+    "left_marker_shear_dx", "left_marker_shear_dy",
+    "right_marker_shear_dx", "right_marker_shear_dy",
+    "left_height_roughness_mm", "right_height_roughness_mm",
+)
 
 FAR_PLANE = tr.DEFAULT_THRESHOLDS["far_plane_mm"]
 
@@ -356,17 +366,11 @@ def _make_client() -> UniVTACTactileApi:
     return UniVTACTactileApi(object(), server_url="http://test:8120")
 
 
-def test_move_reflexive_posts_body_and_returns_scalars_not_images():
+def test_move_reflexive_posts_body_and_returns_step():
     api = _make_client()
-    scalars = {k: 0.0 for k in _MOTION_TACTILE_FIELDS}
     server_resp = {
         "success": True,
-        "tactile": {
-            **scalars,
-            "left_marker_anisotropy": 1.25,
-            "left_rgb_base64": "x",
-            "left_depth_base64": "y",
-        },
+        "tactile": {"step": 42},
         "terminated_by": "contact",
         "event": {"terminated_by": "contact", "steps": 2, "events": ["contact"]},
     }
@@ -374,15 +378,11 @@ def test_move_reflexive_posts_body_and_returns_scalars_not_images():
 
     res = api.move_reflexive(dz=-0.005, stop_on={"contact": True})
 
-    # Every scalar survives, the images do not, and an anisotropy the server
-    # sent is passed through rather than recomputed.
-    assert set(res["tactile"]) == set(_MOTION_TACTILE_FIELDS) | {
-        "left_marker_anisotropy"
-    }
-    assert res["tactile"]["left_marker_anisotropy"] == 1.25
-    assert not any(k.endswith("_base64") for k in res["tactile"])
+    # The API returns only the clock + reflex metadata (no tactile scalars).
+    assert res["step"] == 42
     assert res["terminated_by"] == "contact"
     assert res["event"]["steps"] == 2
+    assert "tactile" not in res  # scalars stripped in the text-API branch
     path, body = api._post.call_args[0]  # type: ignore[union-attr]
     assert path == "/move_reflexive"
     assert body["dz"] == -0.005
@@ -396,28 +396,13 @@ def _marker_png_b64(array: np.ndarray) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def test_motion_tactile_derives_anisotropy_from_the_marker_image():
-    # g[i, j] = 16*i + j: row-to-row gradient 16, column-to-column 1.
-    banded = np.add.outer(np.arange(16) * 16, np.arange(16))
-    out = _trim_motion_tactile({"left_rgb_base64": _marker_png_b64(banded)})
-    assert out["left_marker_anisotropy"] == pytest.approx(16.0, rel=0.05)
-
-    # g[i, j] = i + j: both gradients 1, an evenly loaded gel.
-    even = np.add.outer(np.arange(16), np.arange(16))
-    out = _trim_motion_tactile({"right_rgb_base64": _marker_png_b64(even)})
-    assert out["right_marker_anisotropy"] == pytest.approx(1.0, rel=0.05)
-
-
-def test_server_and_client_anisotropy_agree_on_the_same_image():
-    """The reading is computed server-side now; the number must not move."""
+def test_server_anisotropy_is_stable():
+    """The server-side anisotropy reading is computed from the RGB tensor."""
     arr = np.random.default_rng(0).integers(0, 256, size=(24, 32, 3), dtype=np.uint8)
     tensor = torch.from_numpy(arr)
 
     server = S._rgb_tensor_anisotropy(tensor)
-    client = _marker_anisotropy(S._rgb_tensor_to_base64(tensor))
-
-    assert server is not None and client is not None
-    assert server == pytest.approx(client, rel=1e-12)
+    assert server is not None
     assert S._rgb_tensor_anisotropy(None) is None
 
 
@@ -429,59 +414,17 @@ def test_tactile_response_carries_anisotropy_and_drops_std():
 
 
 def test_tactile_response_declares_every_motion_scalar():
-    # /tactile and /observation answer with this model, not with the free-form
-    # dict the motion primitives pass through, so a reading added to the
-    # payload but not to the model is silently stripped here — and only here.
-    # The ball oracle lost a whole trial to that: its seat close is always
-    # blocked by the ball, so its seated reading always comes back through
-    # /tactile, where the imprint relief had been cut.
+    # /tactile and /observation answer with this model.  The server still
+    # carries the scalar fields even though the client API no longer exposes
+    # them — the server is shared across both arms.
     missing = set(_MOTION_TACTILE_FIELDS) - set(S.TactileResponse.model_fields)
     assert not missing
-
-
-def _banded_marker_b64() -> str:
-    banded = np.add.outer(np.arange(16) * 16, np.arange(16)).astype(np.uint8)
-    return S._rgb_tensor_to_base64(torch.from_numpy(banded))
-
-
-def test_get_tactile_data_prefers_the_server_anisotropy():
-    api = _make_client()
-    payload = S.TactileResponse().model_dump()
-    payload["left_marker_anisotropy"] = 7.5
-    payload["left_rgb_base64"] = _banded_marker_b64()  # would derive 16.0
-    api._get = mock.Mock(return_value=payload)  # type: ignore[method-assign]
-
-    d = api.get_tactile_data()
-
-    assert d["left_marker_anisotropy"] == 7.5  # not recomputed from the image
-
-
-def test_get_tactile_data_derives_anisotropy_when_the_server_omits_it():
-    api = _make_client()
-    payload = S.TactileResponse().model_dump()  # anisotropy defaults to None
-    payload["right_rgb_base64"] = _banded_marker_b64()
-    api._get = mock.Mock(return_value=payload)  # type: ignore[method-assign]
-
-    d = api.get_tactile_data()
-
-    assert d["right_marker_anisotropy"] == pytest.approx(16.0, rel=0.05)
-
-
-def test_motion_tactile_survives_an_undecodable_marker_image():
-    out = _trim_motion_tactile(
-        {
-            "left_rgb_base64": base64.b64encode(b"not an image").decode(),
-            "left_contact": True,
-        }
-    )
-    assert "left_marker_anisotropy" not in out
-    assert out["left_contact"] is True  # the rest of the reading is untouched
 
 
 def test_move_reflexive_stop_on_none_passes_through():
     api = _make_client()
     api._post = mock.Mock(return_value={  # type: ignore[method-assign]
-        "success": True, "tactile": {}, "terminated_by": None, "event": {},
+        "success": True, "tactile": {"step": 5}, "terminated_by": None, "event": {},
     })
     res = api.move_reflexive(dz=-0.005)
     assert res["terminated_by"] is None and res["event"] == {}
@@ -501,25 +444,6 @@ def test_move_reflexive_raises_on_falsy_success():
                     return_value=_FakeResp()):
         with pytest.raises(RuntimeError, match="Motion failed"):
             api.move_reflexive(dz=-0.005)
-
-
-def test_get_tactile_image_decodes_png():
-    img = np.zeros((240, 320, 3), dtype=np.uint8)
-    img[:, :, 1] = 7
-    buf = io.BytesIO()
-    Image.fromarray(img).save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-
-    api = _make_client()
-    api._get = mock.Mock(return_value={"left_rgb_base64": b64})  # type: ignore[method-assign]
-    out = api.get_tactile_image("left")
-    assert out is not None and out.shape == (240, 320, 3) and out.dtype == np.uint8
-    assert out[0, 0, 1] == 7
-
-    api._get.return_value = {"left_rgb_base64": ""}  # type: ignore[union-attr]
-    assert api.get_tactile_image("left") is None
-    api._get.return_value = {"right_rgb_base64": b64}  # wrong side key
-    assert api.get_tactile_image("left") is None
 
 
 # ---------------------------------------------------------------------------

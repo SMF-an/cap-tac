@@ -325,7 +325,7 @@ grasp_centre = foam + np.array([0.0, 0.0, SPONGE_GRASP_LOCAL_Z])
 grasp_ee = grasp_centre + R0 @ np.array([0.0, 0.0, -GRIPPER_OFFSET_M])
 goto_pose(grasp_ee + np.array([0.0, 0.0, SPONGE_ABOVE_M]), q0)
 goto_pose(grasp_ee, q0)
-closed = close_gripper(force_threshold=GRIP_DEPTH_MM, adaptive=True)
+closed = close_gripper(position=0.45)
 report("at_sponge", closed)
 
 # Both pads at or past the release depth means the simulator let the sponge go,

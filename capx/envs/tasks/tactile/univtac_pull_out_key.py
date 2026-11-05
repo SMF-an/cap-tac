@@ -12,13 +12,13 @@ Write ONLY executable Python code (no code fences). Import numpy if needed.
 ORACLE_CODE = """
 import numpy as np
 
-close_gripper()
+close_gripper(position=0.30)
 
 # Rotate to unlock
 for step in range(6):
     move_delta(drz=0.15)
     if detect_slip(threshold_px=2.0):
-        close_gripper()
+        close_gripper(position=0.30)
 
 # Pull out
 for step in range(8):

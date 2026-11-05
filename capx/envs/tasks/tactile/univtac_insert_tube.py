@@ -18,7 +18,7 @@ import numpy as np
 for step in range(15):
     move_delta(dz=-0.002)
     if detect_slip(threshold_px=2.0):
-        open_gripper(); move_delta(dz=0.005); close_gripper()
+        open_gripper(); move_delta(dz=0.005); close_gripper(position=0.25)
     data = get_tactile_data()
     depth_diff = abs(data["left_depth_mm"] - data["right_depth_mm"])
     if depth_diff > 0.5:

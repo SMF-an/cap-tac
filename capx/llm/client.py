@@ -54,6 +54,8 @@ VLM_MODELS = [
     "moonshotai/kimi-k2",
     "moonshotai/kimi-k2.6",
     "meta-llama/llama-4-maverick",
+    "gpt-6-astra",
+    "gpt-6-sol",
 ]
 CLAUDE_MODELS = ["anthropic/claude-opus-4-5", "anthropic/claude-haiku-4-5"]
 OSS_MODELS = [
@@ -352,6 +354,27 @@ def query_model(args: LaunchArgs | ModelQueryArgs, prompt: list[dict]) -> str:
     try:
         if is_responses_model(args.model):
             out["content"] = _responses_content(body)
+            # An empty Responses body is a provider failure, not an answer.
+            # The local proxy streams by default, but when the stream fails it
+            # falls back to a non-streaming call that can answer
+            # 200/completed with no text at all; the caller then runs an empty
+            # program and scores 0 (2026-11-05: 2 of 4 bulb trials).  Retry
+            # rather than treat silence as the model's decision.
+            empty_retry = 0
+            while not (out["content"] or "").strip() and empty_retry < 3:
+                empty_retry += 1
+                wait = 10 * empty_retry
+                print(
+                    f"Empty response from {args.model}; "
+                    f"retry {empty_retry}/3 in {wait}s ..."
+                )
+                time.sleep(wait)
+                response = requests.post(
+                    server_url, headers=headers, data=json.dumps(payload), timeout=600
+                )
+                response.raise_for_status()
+                body = response.json()
+                out["content"] = _responses_content(body)
         else:
             out["content"] = body["choices"][0]["message"]["content"]
         if out["content"] is None:

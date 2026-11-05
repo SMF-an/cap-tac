@@ -383,6 +383,31 @@ def _get_visual_feedback(
     return b64_list, pil_list
 
 
+def _prompt_text_with_image_notes(message: dict) -> str:
+    """The text half of one prompt, with a marker where images were attached.
+
+    The transcript keeps text only: an attached image is a base64 data URL of
+    a megabyte or more, and re-saving it says nothing a reader can use.  But
+    dropping it silently leaves the saved prompt ending in "Included below is
+    an image ..." with nothing below, which reads as if the image never
+    reached the model.  The marker says it did.
+    """
+    content = message["content"]
+    text = content[0]["text"]
+    if isinstance(text, list):
+        text = "\n".join(map(str, text))
+    n_images = sum(
+        1 for block in content
+        if block.get("type") in ("image_url", "input_image")
+    )
+    if n_images:
+        text += (
+            f"\n\n[{n_images} image(s) attached to this prompt; "
+            "not stored in this transcript]"
+        )
+    return str(text)
+
+
 def _save_trial_artifacts(
     config: dict[str, Any],
     trial: int,
@@ -449,18 +474,18 @@ def _save_trial_artifacts(
             (trial_dir / "prompts_and_responses" / "task_seg_prompt.txt").write_text(str(response["task_seg_prompt"]))
         if "initial_prompt" in response:
             try:
-                initial_prompt_content = response["initial_prompt"][-1]["content"][0]["text"]
-                if isinstance(initial_prompt_content, list):
-                    initial_prompt_content = "\n".join(map(str, initial_prompt_content))
-                (trial_dir / "prompts_and_responses" / "initial_prompt.txt").write_text(str(initial_prompt_content))
+                initial_prompt_content = _prompt_text_with_image_notes(
+                    response["initial_prompt"][-1]
+                )
+                (trial_dir / "prompts_and_responses" / "initial_prompt.txt").write_text(initial_prompt_content)
             except Exception as e:
                 print(f"Error saving initial_prompt: {e}")
         if "multi_turn_prompt" in response and response["multi_turn_prompt"] is not None:
             try:
-                multi_turn_prompt_content = response["multi_turn_prompt"][-1]["content"][0]["text"]
-                if isinstance(multi_turn_prompt_content, list):
-                    multi_turn_prompt_content = "\n".join(map(str, multi_turn_prompt_content))
-                (trial_dir / "prompts_and_responses" / f"multi_turn_prompt_{i:02d}.txt").write_text(str(multi_turn_prompt_content))
+                multi_turn_prompt_content = _prompt_text_with_image_notes(
+                    response["multi_turn_prompt"][-1]
+                )
+                (trial_dir / "prompts_and_responses" / f"multi_turn_prompt_{i:02d}.txt").write_text(multi_turn_prompt_content)
             except Exception as e:
                 print(f"Error saving multi_turn_prompt_{i}: {e}")
             i += 1

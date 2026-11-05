@@ -28,4 +28,4 @@ object, so reuse the offset from your first successful grasp.
   hand's current position and the returned pose lands somewhere else.
 - Measure the offset off a real grasp, not off the object's nominal size: it is
   the difference between where the hand closed and where the object's origin
-  sits, and both of those come from the run ([[no-absolute-without-reference]]).
+  sits, and both of those come from the run.

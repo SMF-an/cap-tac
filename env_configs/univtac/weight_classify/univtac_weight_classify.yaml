@@ -27,5 +27,16 @@ api_servers:
 record_video: true
 output_dir: ./outputs/univtac_weight_classify
 
-trials: 100
+trials: 30
 num_workers: 1  # Isaac Sim is not parallel-safe
+# Seeds 1-4 are already on disk from the interrupted 2026-11-02 batch; continue
+# at seed 5 (seeds are trial numbers).
+resume_idx: 5
+
+use_visual_feedback: true
+# Same VLM scene description as the grasp_classify and hardness_classify arms:
+# appended right after the image sentence.  gpt-6 names are served only by the
+# local proxy.
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
