@@ -1,11 +1,17 @@
+import copy
+
 from capx.envs.tasks.base import CodeExecutionEnvBase
+from capx.serving.tension_strap_spec import (
+    goal_sentence,
+    hold_moves,
+    sample_sequence,
+)
 
 PROMPT = """
 You are controlling a Franka Emika robot with GelSight Mini tactile sensors
 on both fingertips. The API is described below.
 
-Goal: pull the elastic strap to 12 newtons and hold it there for three
-seconds, then pull it to 18 newtons and hold that for three seconds. A hold
+Goal: {goal}. A hold
 counts only if it stays within half a newton of its target. The strap is the
 only thing in the scene, and it is called "elastic_strap".
 
@@ -58,7 +64,9 @@ GRASP_DEPTH_MM = 27.6
 CONTACT_PX = 1.0
 
 # --- The two stages -----------------------------------------------------------
-TARGETS_N = (12.0, 18.0)
+# Drawn from the seed this server serves, and rendered in below; see
+# capx/serving/tension_strap_spec.py for the draw and why it is that narrow.
+TARGETS_N = __TARGETS__
 
 # --- The gel as the force sensor ----------------------------------------------
 # What carries the load is the tab slipping down between the pads, and what
@@ -110,7 +118,7 @@ SETTLE_N = 0.15
 # A loop that believed that would pull the hand down and turn a good hold into
 # a real release.  The creep is handled where it belongs: the reading is
 # re-anchored after each hold, at a point where the load is known.
-HOLD_MOVES = 14
+HOLD_MOVES = __HOLD_MOVES__
 
 
 def pads(reply):
@@ -263,7 +271,7 @@ else:
             break
         print("stage %d: %.2f N at z %.4f (slope %.0f N/m)"
               % (index + 1, landed, state["z"], state["slope"] or 0.0))
-        hold(HOLD_MOVES)
+        hold(HOLD_MOVES[index])
         held_n = tension_n(state["reply"], state["offset"])
         print("stage %d held; reading now %.2f N"
               % (index + 1, -99.0 if held_n is None else held_n))
@@ -272,6 +280,49 @@ else:
 """
 
 
+ORACLE_TEMPLATE = ORACLE_CODE
+
+
+def render_oracle(sequence) -> str:
+    """The oracle for one draw: its targets and its hold length, not constants."""
+    first, first_hold, second, second_hold = sequence
+    return (
+        ORACLE_TEMPLATE
+        .replace("__TARGETS__", "(%r, %r)" % (first, second))
+        .replace("__HOLD_MOVES__",
+                 "(%d, %d)" % (hold_moves((first_hold,)),
+                               hold_moves((second_hold,))))
+    )
+
+
 class UniVTACTensionStrapCodeEnv(CodeExecutionEnvBase):
-    prompt = PROMPT
-    oracle_code = ORACLE_CODE
+    """The strap task with the force/time sequence its trial was given.
+
+    The sequence is a property of the seed, so it cannot be a class constant:
+    the prompt, the instruction the model reads and the oracle's own targets
+    are all re-rendered in ``reset`` from the trial id, which is the same seed
+    the server configured the task's acceptance limits from.
+    """
+
+    prompt = PROMPT.format(goal=goal_sentence(sample_sequence(0)))
+
+    def __init__(self, cfg) -> None:
+        self._sequence = sample_sequence(0)
+        super().__init__(cfg)
+
+    @property
+    def oracle_code(self) -> str:
+        return render_oracle(self._sequence)
+
+    def reset(self, *, seed=None, options=None):
+        obs, info = super().reset(seed=seed, options=options)
+        self._sequence = sample_sequence(0 if seed is None else seed)
+        self._task_prompt = PROMPT.format(goal=goal_sentence(self._sequence))
+        self._full_prompt = [
+            {"role": "system", "content": self._system_prompt},
+            {"role": "user",
+             "content": [{"type": "text", "text": self._get_complete_prompt()}]},
+        ]
+        obs["full_prompt"] = copy.deepcopy(self._full_prompt)
+        info["task_prompt"] = self._task_prompt
+        return obs, info

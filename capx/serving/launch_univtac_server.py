@@ -3503,6 +3503,23 @@ def init_task(task_name: str, device: str, sensor_type: str = "gsmini",
             # _apply_task_config.  It is false in every force-task profile
             # today, so this only preserves the documented invariant.
             binder_config = {k: v for k, v in task_config.items() if k != "skip_pre_move"}
+            if task_name == "tension_strap":
+                # The strap's two force levels and their hold durations are
+                # drawn from the seed rather than fixed by the profile, so one
+                # server's trials ask for a different pair of holds than the
+                # next one's.  ViTaForge reads them through
+                # StrapAcceptanceLimits.from_parameters, which is where the
+                # range, the two-level shape and the fixed 0.5 N tolerance are
+                # enforced; the client renders the same draw into the prompt.
+                from capx.serving.tension_strap_spec import (
+                    as_list,
+                    sample_sequence,
+                )
+                parameters = dict(binder_config.get("task_parameters") or {})
+                parameters["force_time_sequence"] = as_list(sample_sequence(seed))
+                binder_config["task_parameters"] = parameters
+                logger.info("Strap sequence for seed %s: %s",
+                            seed, parameters["force_time_sequence"])
             prepare_force_task_config(env_cfg, binder_config, config_path, seed=seed)
             logger.info(
                 "Bound force-task parameters from %s (physics_seed=%s, workspace=%s)",
