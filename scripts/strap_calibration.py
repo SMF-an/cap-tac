@@ -93,6 +93,11 @@ def main() -> int:
         px.append(d)
         n.append(truth)
         print("  +%4.1f mm  |d|=%6.2f px  truth=%7.3f N" % (step, d, truth))
+        if truth > 20.0:
+            # The task ruptures the strap past its overload, and a ruptured
+            # strap needs a new server process; stop with the points we have.
+            print("  stopping: past 20 N, and the task tears the strap at 24")
+            break
 
     px_a, n_a = np.array(px), np.array(n)
     good = n_a > 0.5
