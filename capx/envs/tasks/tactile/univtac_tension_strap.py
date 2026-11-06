@@ -29,6 +29,17 @@ what is comparable is one reading against another at the same grip — the
 unloaded grip first, then each pull — so steer by the change in the
 description and by the direction each further step moves it.
 
+A description that talks about the image, or names no surface at all, is a
+missing reading: read again at the same grip, or re-grasp if it persists.  It
+is not a zero, and it is not a reason to stop.
+
+Nothing here asks you to name the tension.  The score is the strap's own
+physical tension while the hand holds it, so the episode is a search and not a
+calibration: pull, read, and let the change between two readings choose the
+next step.  How stiff this strap is only becomes known by pulling it, and a
+step that misses still says which way to correct.  Act on the best reading you
+have; raising an error instead of moving measures nothing and scores nothing.
+
 The strap is elastic, so the load is set by how high the hand holds it and by
 nothing else: raising the hand loads the strap, and lowering it gives back as
 much. Nothing else moves that number - there is no second lever and nothing
@@ -41,16 +52,14 @@ Write ONLY executable Python code (no code fences). Import numpy if needed.
 ORACLE_CODE = """
 import math
 
-# --- Where the tab is ---------------------------------------------------------
-# The strap is added at base [0.55, 0, 0.005] and the tab -- the block at its
-# top, the only part the pads can close on -- is centred 0.174 above that base
-# (envs/tension_strap.py:561,578).  The wrist sits GRIPPER_OFFSET along the
-# gripper centre's own +z (the tool points down), so the flange that puts the
-# pads on the tab's centre is the centre plus that offset.
+# --- Where to grasp -----------------------------------------------------------
+# The task's own grasp pose: the server builds it from the strap's base plus
+# the tab's height, which is the point the task's own grasp was measured at.
+# Building it by hand instead -- the tab's height above the base plus the
+# flange offset -- misses it by four or five millimetres, and on an opening
+# close that is the difference between pads at 25.70/25.25 mm and pads at
+# 25.60/24.94, where the gel reads a different gain.
 STRAP = "elastic_strap"
-STRAP_BASE = (0.55, 0.0, 0.005)
-TAB_LOCAL_Z = 0.174
-GRIPPER_OFFSET_M = 0.131
 APPROACH_CLEAR_M = 0.05
 
 # --- The grip -----------------------------------------------------------------
@@ -156,16 +165,15 @@ def tension_n(reply, offset=GEL_OFFSET_N):
     return None if slip is None else GEL_N_PER_PX * slip + offset
 
 
-# --- 1. The hand's own orientation (the only thing worth sampling here) ------
-# sample_grasp_pose's first call returns the hand's own pose.  The strap's own
-# pose is the base of a body that deforms, not a point to hang a grasp off, so
-# what this is for is the quaternion.
-_, q0 = sample_grasp_pose(STRAP)
-
-tab = (STRAP_BASE[0], STRAP_BASE[1], STRAP_BASE[2] + TAB_LOCAL_Z)
-grasp_z = tab[2] + GRIPPER_OFFSET_M
-xy = (tab[0], tab[1])
-print("tab at %s, flange target z %.4f" % (tab, grasp_z))
+# --- 1. Where to grasp --------------------------------------------------------
+# The task's own helper returns the tab's grasp pose, rebuilt from the strap's
+# base and the tab's height on every call -- the pose the task's own grasp was
+# measured at.
+grasp, q0 = sample_grasp_pose(STRAP)
+grasp = (float(grasp[0]), float(grasp[1]), float(grasp[2]))
+xy = (grasp[0], grasp[1])
+grasp_z = grasp[2]
+print("grasp pose %s" % (grasp,))
 
 # --- 2. Take the tab ----------------------------------------------------------
 goto_pose((xy[0], xy[1], grasp_z), q0, z_approach=APPROACH_CLEAR_M)

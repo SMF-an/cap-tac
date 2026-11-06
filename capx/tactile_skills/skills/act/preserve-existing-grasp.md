@@ -3,7 +3,7 @@ id: A9
 name: preserve-existing-grasp
 family: act
 summary: A working grasp beats a tidier one — every release risks losing the object.
-task_types: [manipulate, insert, screw, wipe]
+task_types: [manipulate, insert, screw, wipe, force]
 channels: []
 objects: any
 evidence: On the screw task each re-grasp is also a released part and a thread to find again, which is why the reset cadence is planned around the wrist limit rather than around convenience.

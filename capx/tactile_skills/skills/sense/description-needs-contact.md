@@ -3,7 +3,7 @@ id: S25
 name: description-needs-contact
 family: sense
 summary: The text covers only what the pads touch; a gel under nothing describes no surface.
-task_types: [classify]
+task_types: [classify, force]
 channels: [text]
 objects: any surface read through describe_tactile
 evidence: >-
