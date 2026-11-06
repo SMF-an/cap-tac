@@ -1,12 +1,14 @@
+import copy
+
 from capx.envs.tasks.base import CodeExecutionEnvBase
+from capx.serving.tension_strap_spec import goal_sentence, sample_sequence
 
 PROMPT = """
 You are controlling a Franka Emika robot with GelSight Mini tactile sensors
 on both fingertips. The API is described below.
 
-Goal: pull the elastic strap to 12 newtons and hold it there for three
-seconds, then pull it to 18 newtons and hold that for three seconds. A hold
-counts only if it stays within half a newton of its target. The strap is the
+Goal: {goal}. A hold counts only if it stays within half a newton of its
+target. The strap is the
 only thing in the scene, and it is called "elastic_strap".
 
 The simulation advances only while the hand is being commanded; waiting passes
@@ -27,10 +29,11 @@ what is comparable is one reading against another at the same grip — the
 unloaded grip first, then each pull — so steer by the change in the
 description and by the direction each further step moves it.
 
-The strap is elastic, so the load is set by where the hand is and by nothing
-else - the pull raises it and backing off lowers it by as much. There is no
-second lever and nothing to press against, and nothing is scored on arriving:
-the score is the two holds.
+The strap is elastic, so the load is set by how high the hand holds it and by
+nothing else: raising the hand loads the strap, and lowering it gives back as
+much. Nothing else moves that number - there is no second lever and nothing
+to press against, and sideways or downward motion only loses what the lift
+bought. Nothing is scored on arriving: the score is the two holds.
 
 Write ONLY executable Python code (no code fences). Import numpy if needed.
 """
@@ -281,5 +284,30 @@ else:
 
 
 class UniVTACTensionStrapCodeEnv(CodeExecutionEnvBase):
-    prompt = PROMPT
-    oracle_code = ORACLE_CODE
+    """The strap task with the force/time sequence its trial was given.
+
+    The sequence is a property of the seed, so it cannot be a class constant:
+    the goal the model reads is re-rendered in ``reset`` from the trial id,
+    which is the same seed the server configured the task's acceptance limits
+    from (capx/serving/tension_strap_spec.py).
+
+    ``oracle_code`` is the scalar-channel reference and does not run on this
+    branch: a motion reply here carries only ``step``, so every field it reads
+    for its load estimate is gone.  It is left as the record of how the task
+    was solved through the gel's numbers, not as something to execute.
+    """
+
+    prompt = PROMPT.format(goal=goal_sentence(sample_sequence(0)))
+
+    def reset(self, *, seed=None, options=None):
+        obs, info = super().reset(seed=seed, options=options)
+        self._task_prompt = PROMPT.format(
+            goal=goal_sentence(sample_sequence(0 if seed is None else seed)))
+        self._full_prompt = [
+            {"role": "system", "content": self._system_prompt},
+            {"role": "user",
+             "content": [{"type": "text", "text": self._get_complete_prompt()}]},
+        ]
+        obs["full_prompt"] = copy.deepcopy(self._full_prompt)
+        info["task_prompt"] = self._task_prompt
+        return obs, info
