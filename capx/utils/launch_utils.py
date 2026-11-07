@@ -68,6 +68,12 @@ class TrialSummary:
     num_regenerations: int = 0
     num_finishes: int = 0
     num_code_blocks: int = 0
+    # Summed API usage over every model call the trial made (policy, VDM).
+    input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    cached_tokens: int = 0
+    token_calls: int = 0
 
 
 def run_server_proc(api_cfg) -> multiprocessing.Process:
@@ -513,6 +519,11 @@ def _print_and_save_summary(
     total_code_blocks = 0
     total_regenerations = 0
     total_finishes = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_reasoning_tokens = 0
+    total_cached_tokens = 0
+    total_token_calls = 0
     executed_trials = len(summaries)
 
     for summary in summaries:
@@ -525,6 +536,11 @@ def _print_and_save_summary(
         total_code_blocks += summary.num_code_blocks
         total_regenerations += summary.num_regenerations
         total_finishes += summary.num_finishes
+        total_input_tokens += summary.input_tokens
+        total_output_tokens += summary.output_tokens
+        total_reasoning_tokens += summary.reasoning_tokens
+        total_cached_tokens += summary.cached_tokens
+        total_token_calls += summary.token_calls
 
     if executed_trials == 0:
         print("No trials completed.")
@@ -573,6 +589,11 @@ def _print_and_save_summary(
     print(f"Average code blocks: {average_code_blocks:.3f}")
     print(f"Average regenerations: {average_regenerations:.3f}")
     print(f"Average finishes: {average_finishes:.3f}")
+    print(
+        f"Token usage (all trials): input={total_input_tokens} "
+        f"output={total_output_tokens} reasoning={total_reasoning_tokens} "
+        f"cached={total_cached_tokens} calls={total_token_calls}"
+    )
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
 
     # Write summaries to a txt file
@@ -591,4 +612,11 @@ def _print_and_save_summary(
             f.write(f"Average code blocks: {average_code_blocks:.3f}\n")
             f.write(f"Average regenerations: {average_regenerations:.3f}\n")
             f.write(f"Average finishes: {average_finishes:.3f}\n")
+            f.write(
+                f"Token usage (all trials): input={total_input_tokens} "
+                f"output={total_output_tokens} "
+                f"reasoning={total_reasoning_tokens} "
+                f"cached={total_cached_tokens} "
+                f"calls={total_token_calls}\n"
+            )
             f.write(f"Elapsed time: {elapsed_time:.2f} seconds\n")
