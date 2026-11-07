@@ -127,10 +127,12 @@ from .tactile.univtac_api import UniVTACTactileApi
 from .tactile.univtac_ball_api import UniVTACBallApi
 from .tactile.univtac_motion_api import UniVTACMotionApi
 from .tactile.univtac_perception_api import UniVTACPerceptionApi
+from .tactile.univtac_piano_api import UniVTACPianoApi
 register_api("UniVTACTactileApi", UniVTACTactileApi)
 register_api("UniVTACBallApi", UniVTACBallApi)
 register_api("UniVTACMotionApi", UniVTACMotionApi)
 register_api("UniVTACPerceptionApi", UniVTACPerceptionApi)
+register_api("UniVTACPianoApi", UniVTACPianoApi)
 
 if _libero_available:
     register_api("FrankaLiberoPrivilegedApi", FrankaLiberoPrivilegedApi)

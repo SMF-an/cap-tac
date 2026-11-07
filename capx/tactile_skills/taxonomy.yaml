@@ -157,8 +157,18 @@ task_types:
     # this task is routed to that family; the descent-and-seat rules that the
     # rest of `manipulate` carries do not.
     #
-    # tension_strap (2026-10-31) is the only member.  Its load is not a
+    # tension_strap (2026-10-31) was the first member.  Its load is not a
     # position and not a force the API reports: the strap's modulus is drawn
     # per episode, so the same tension sits at a different height on every
     # seed, and only the gel can say how hard it is being pulled.
+    #
+    # arm_shadow_piano (2026-11-07) is the second.  Each note is a force held
+    # for 0.12 s, scored on the key's own measured contact force, and on this
+    # branch the gel is read only as Octopi's text description -- so the
+    # episode is a sequence of presses steered by that description.  None of
+    # the family's grasp rules describes a single-finger key press, but the
+    # reading rule the branch already routes here (description-needs-contact)
+    # does: a pad over nothing describes no surface, and that unloaded
+    # description against the pressed readings is what the descent steers by.
     - tension_strap
+    - arm_shadow_piano

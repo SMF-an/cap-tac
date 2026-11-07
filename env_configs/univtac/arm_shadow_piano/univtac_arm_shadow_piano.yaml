@@ -1,0 +1,123 @@
+# ViTaForge: arm_shadow_piano -- SHADOW HAND PLAYS A NOTE SEQUENCE
+# Usage: uv run capx/envs/launch.py --config-path env_configs/univtac/arm_shadow_piano/univtac_arm_shadow_piano.yaml
+#
+# The server must be started BEFORE this, on the same port, AND WITH THE SEED
+# THAT MATCHES THE TRIAL:
+#   bash scripts/launch_univtac_server.sh arm_shadow_piano 8120 <gpu> <seed>
+#                                                                       ^ seed = trial id
+#
+# --- What the task is ----------------------------------------------------------
+#
+# A Franka Panda carries a five-finger Shadow Hand over a physical 88-key
+# piano.  Only the index finger moves; every other hand joint is welded and
+# the wrist orientation is fixed.  The episode plays a sequence of six notes
+# drawn from the WHITE keys of C4-B4 -- the trial's seed fixes the notes and
+# each note's dynamic (light or heavy).
+#
+# The index finger carries an unscaled GelSight Mini.  The GelSight/UIPC
+# backend (env/tasks/_index_tactile.py) owns both the gel-key contact and the
+# key mechanics for the white keys it can reach, which is why the sequence is
+# white-key only: a black key would fall back to PhysX and be scored by a
+# different sensor.  The hand has one pad, so cap-x serves it as the LEFT pad;
+# the right_* tactile fields are missing, not zero.
+#
+# The Shadow Hand asset downloads from NVIDIA on the server's first launch
+# (isaaclab_assets.SHADOW_HAND_CFG); the task itself targets Isaac Sim 5.1 /
+# Isaac Lab 2.3.2, the same stack ViTaForge's other ported tasks run on.  The
+# UIPC workspace (the gel/key scene dump) is put under the server's temp root,
+# keyed by seed.
+#
+# A note counts when the right key is pressed with the measured contact force
+# inside its band, held for 0.12 s of simulated time, and released before the
+# next note (a repeated pitch needs its own release).  A wrong key, or a force
+# above the band for more than 0.05 s, ends the episode.  Success requires
+# every note played.
+#
+# --- The tactile channel on this branch ----------------------------------------
+#
+# This is the Octopi text arm: the gel is read only through describe_tactile(),
+# which sends the index pad's image to the Octopi-1.5 service on port 8130 and
+# returns a natural-language description of the surface.  There is no scalar
+# tactile layer and no image-to-force model on this branch -- the description
+# is the only tactile reading a policy gets, and the task's score stays the
+# key's own measured force, as on every branch.
+#
+# The Octopi service must be running before the trial (see the API module's
+# docstring); describe_tactile falls back to an empty description when it is
+# unreachable, and a trial that reads nothing will not find a band.
+#
+# The press is assembled from the API's position primitives: goto_pose to the
+# key's press height, rise 2 mm, close_gripper(position=0.0) to put the finger
+# down without loading the key, then lower the palm in 0.1 mm steps with
+# goto_pose and describe_tactile after each one.  move_delta cannot step finer
+# than 2 mm, so the descent must use goto_pose.
+#
+# --- What one trial costs ------------------------------------------------------
+#
+# The task's own clock is episode_seconds = 180 s at 30 control steps/s
+# (physics 240 Hz, action_repeat 8), i.e. 5400 control steps.  Each
+# describe_tactile call adds a gel render and an Octopi inference (~1-2 s of
+# wall clock), so a press that reads after every step is slower than the
+# scalar arm's force servo.  The alarm below is the same budget the scalar
+# arm's config uses.
+#
+# --- One process, one seed ----------------------------------------------------
+#
+# capx/serving/launch_univtac_server.py draws the note sequence from the
+# server's --seed with capx/serving/piano_spec.py and writes it into the task
+# before construction.  The client renders the same draw from the trial id
+# (trial.py:668, seed=trial), so the prompt and the scorer agree only when the
+# server was started on that seed.  A second seed needs a second server
+# process.
+#
+# Trial id IS the seed, and runner.py builds range(resume_idx, trials + 1).
+# Seed 0 cannot be selected alone (resume_idx=0, trials=0 exits; trials=1 runs
+# seeds 0 AND 1), so the pair below is one trial at seed 1.  Move both numbers
+# together and restart the server on the matching seed.
+exec_alarm_seconds: 3600
+
+env:
+  _target_: capx.envs.tasks.tactile.univtac_arm_shadow_piano.UniVTACArmShadowPianoCodeEnv
+  cfg:
+    _target_: capx.envs.tasks.base.CodeExecEnvConfig
+    low_level: env_configs/univtac/arm_shadow_piano/low_level_arm_shadow_piano.yaml
+    # Inert for UniVTAC: base.py only consults this when low_level is a
+    # gym-registry string, not a YAML path.  This task has no object poses to
+    # be privileged about -- the keys are articulation bodies with no pose
+    # query -- and the force it is scored on is the task's own measurement,
+    # served to every API class alike.
+    privileged: false
+    apis:
+      - UniVTACPianoApi
+
+# Informational only: UniVTACStubEnv defaults to 127.0.0.1:8120 (override with
+# UNIVTAC_SERVER_URL), and the server must already be listening (a free port
+# here would spawn a child that fails instantly and stall the run for 120 s).
+api_servers:
+  - _target_: capx.serving.launch_univtac_server.main
+    task: arm_shadow_piano
+    port: 8120
+    host: 127.0.0.1
+
+record_video: true
+# The runner inserts the model name before the last path component, so this
+# lands under outputs/gpt-6-astra/octopi_arm_shadow_piano/ -- a directory of
+# its own, kept apart from the scalar arm's univtac_arm_shadow_piano runs.
+output_dir: ./outputs/octopi_arm_shadow_piano
+
+# The observer camera is served through /observation (aimed at the keyboard by
+# the adapter), so the visual-differencing channel works without a server
+# change -- it needs the VDM endpoint below.  It is a second, non-tactile
+# channel: the gel is read only through describe_tactile().
+use_visual_feedback: true
+use_img_differencing: true
+# Only consulted when use_img_differencing is on; the name must be in
+# capx.llm.client.VLM_MODELS (the runner asserts it, and a name outside that
+# list fails the trial before the first action).  gpt-6-astra is Responses-only,
+# so the client routes it to the same server's /responses.
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
+
+trials: 1
+resume_idx: 1
+num_workers: 1  # Isaac Sim is not parallel-safe
