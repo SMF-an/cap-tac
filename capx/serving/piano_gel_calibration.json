@@ -1,0 +1,138 @@
+{
+  "format": "piano-gel-force/2",
+  "task": "arm_shadow_piano",
+  "tactile": "gsmini",
+  "image_width": 320,
+  "features": [
+    "mean_mm",
+    "area_gt_0p01",
+    "area_gt_0p05",
+    "area_gt_0p20",
+    "area_rate",
+    "gradient_mm_per_px"
+  ],
+  "valid_depth_mm": 31.0,
+  "model": {
+    "median": [
+      0.1054113507270813,
+      0.9424731182795698,
+      0.7096522177419355,
+      0.15760248655913978,
+      0.023445900537634456,
+      -0.001398918524072082
+    ],
+    "iqr": [
+      0.08370175864547491,
+      0.0747101814516129,
+      0.3654527889784946,
+      0.27419354838709675,
+      0.06102150537634407,
+      0.0010706348889173395
+    ],
+    "weight": [
+      0.38211160281588447,
+      -0.7183448835405839,
+      -0.00041058483688864386,
+      -0.18479234720963666,
+      0.026842046183792025,
+      -0.03516341230109885,
+      -0.9993557448268208,
+      -0.578941184158215,
+      0.0001438517459688756,
+      -0.05392926359264874,
+      0.08149717442923096,
+      0.011398555186798767,
+      0.5068102603017253
+    ],
+    "alpha": 0.01,
+    "order": "1, linear, square",
+    "range_min": [
+      2.6829236958292313e-05,
+      0.0,
+      0.0,
+      0.0,
+      -0.01456653225806448,
+      -0.002333874895271599
+    ],
+    "range_max": [
+      0.17821137607097626,
+      0.9647942971468921,
+      0.8236688579162393,
+      0.3945050477674639,
+      0.1961021505376344,
+      -3.9598805947433854e-07
+    ],
+    "range_margin": 0.05
+  },
+  "bands": {
+    "light": {
+      "band_N": [
+        0.28,
+        0.42
+      ],
+      "target_N": 0.35
+    },
+    "heavy": {
+      "band_N": [
+        0.43,
+        0.57
+      ],
+      "target_N": 0.5
+    }
+  },
+  "saturation_N": 0.43,
+  "plateau": {
+    "fraction": 0.3,
+    "min_samples": 6,
+    "window": 3
+  },
+  "press": {
+    "raise_mm": 2.0,
+    "step_mm": 0.1,
+    "settle_steps": 3,
+    "settle_at_pose_steps": 10,
+    "ramp_levels": 21,
+    "ramp_settle": 2,
+    "press_angle_rad": 0.5,
+    "max_steps": 60
+  },
+  "hold_seconds": 0.12,
+  "validation": {
+    "frames": 300,
+    "keys": [
+      60,
+      62,
+      64,
+      65,
+      67,
+      69,
+      71
+    ],
+    "protocol": "leave one white key out, fit on the other six",
+    "loo_mae_N": 0.011543489666431374,
+    "loo_p95_N": 0.03487805709618896,
+    "predicted_in_band": {
+      "light": 0.9294117647058824,
+      "heavy": 0.9722222222222222
+    }
+  },
+  "closed_loop": {
+    "protocol": "fresh episode per press, stop on the live estimate, PhysX force read once at the stop",
+    "light": {
+      "stop_z_mm": 0.1,
+      "actual_N": [
+        0.352,
+        0.374
+      ],
+      "in_band": "7/7"
+    },
+    "heavy": {
+      "stop_z_mm": -0.8,
+      "actual_N": [
+        0.438,
+        0.459
+      ],
+      "in_band": "7/7"
+    }
+  }
+}

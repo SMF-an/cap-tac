@@ -68,6 +68,11 @@ _MOTION_TACTILE_FIELDS = (
     "right_marker_shear_dy",
     "left_height_roughness_mm",
     "right_height_roughness_mm",
+    # The piano's gel force estimate, newtons, and its quality tag.  Absent
+    # (not zero) on tasks whose gel has no calibrated force model, and before
+    # a piano press has captured its no-contact frame.
+    "left_force_N",
+    "left_force_quality",
 )
 
 

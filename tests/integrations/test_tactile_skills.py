@@ -590,15 +590,23 @@ def test_the_complete_prompt_carries_the_block_after_the_apis() -> None:
 
 
 def test_the_only_hook_override_is_the_perception_bulb_variant() -> None:
-    """The taxonomy is the routing table, with one deliberate exception.
+    """The taxonomy is the routing table, with two deliberate exceptions.
 
     The bulb's perception config must not be handed `bulb-grasp-pose`: that
     skill's recipe is the server's ground-truth grasp branch
     (`_GT_GRASP_RULES`), and the perception API class switches that branch off
     (`_ground_truth_grasp = False`), so on that line it names a call that
     returns the hand's own parked pose.  Its class names the library's bulb
-    routing minus that one skill by hand; nothing else opts out or names
-    skills, so a second override appearing here is a decision, not a drift.
+    routing minus that one skill by hand.
+
+    The piano (2026-11-06) names exactly one skill.  Its index gel is real,
+    but the task is a single-finger key press: none of the force family's
+    grasp / carry / load rules describes it, so the class names the one rule
+    written for it instead of letting type-routing hand it the strap and bulb
+    recipes.
+
+    Nothing else opts out or names skills, so a third override appearing here
+    is a decision, not a drift.
     """
     from capx.envs.tasks import tactile as tactile_tasks
     import importlib
@@ -613,7 +621,17 @@ def test_the_only_hook_override_is_the_perception_bulb_variant() -> None:
             if isinstance(obj, type) and hasattr(obj, "tactile_skills"):
                 declared[name] = obj.tactile_skills
 
-    assert set(declared) == {"UniVTACBulbTighteningPerceptionCodeEnv"}, declared
+    assert set(declared) == {
+        "UniVTACBulbTighteningPerceptionCodeEnv",
+        "UniVTACArmShadowPianoCodeEnv",
+    }, declared
+    assert declared["UniVTACArmShadowPianoCodeEnv"] == (
+        "piano-gel-force-band",), declared["UniVTACArmShadowPianoCodeEnv"]
+    piano_block = _StubTask(
+        "arm_shadow_piano", tactile_skills=("piano-gel-force-band",)
+    )._tactile_skill_block()
+    assert "piano-gel-force-band" in piano_block, piano_block
+    assert "bulb-close-force" not in piano_block, piano_block
 
     named = set(declared["UniVTACBulbTighteningPerceptionCodeEnv"])
     routed = {s.name for s in default_library().for_task("bulb_tightening")}

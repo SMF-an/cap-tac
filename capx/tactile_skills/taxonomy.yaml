@@ -157,8 +157,18 @@ task_types:
     # this task is routed to that family; the descent-and-seat rules that the
     # rest of `manipulate` carries do not.
     #
-    # tension_strap (2026-10-31) is the only member.  Its load is not a
+    # tension_strap (2026-10-31) is the first member.  Its load is not a
     # position and not a force the API reports: the strap's modulus is drawn
     # per episode, so the same tension sits at a different height on every
     # seed, and only the gel can say how hard it is being pulled.
+    #
+    # arm_shadow_piano (2026-11-06) is here for the routing the config test
+    # requires, and for the one rule written for it.  Its index gel is real
+    # (GelSight Mini / UIPC) and now carries a calibrated force estimate
+    # (piano-gel-force-band, S25), so `force` is the right family: the episode
+    # is a sequence of presses each held at a number.  None of the family's
+    # other grasp / carry / load rules describes a single-finger key press;
+    # the env class names exactly that one skill in its `tactile_skills`
+    # tuple, so the strap/bulb recipes are not delivered to a pad on a key.
     - tension_strap
+    - arm_shadow_piano

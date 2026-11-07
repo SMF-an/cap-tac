@@ -1,3 +1,4 @@
+from .univtac_arm_shadow_piano import UniVTACArmShadowPianoCodeEnv
 from .univtac_blind_pick import UniVTACBlindPickCodeEnv
 from .univtac_blind_pick_balls import UniVTACBlindPickBallsCodeEnv
 from .univtac_bulb_tightening import UniVTACBulbTighteningCodeEnv
@@ -34,4 +35,5 @@ __all__ = [
     "UniVTACBlindPickCodeEnv",
     "UniVTACBlindPickBallsCodeEnv",
     "UniVTACTensionStrapCodeEnv",
+    "UniVTACArmShadowPianoCodeEnv",
 ]

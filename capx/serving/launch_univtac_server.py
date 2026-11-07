@@ -123,6 +123,7 @@ AVAILABLE_TASKS = [
     "blind_pick",
     "blind_pick_balls",
     "tension_strap",
+    "arm_shadow_piano",
 ]
 
 
@@ -351,6 +352,35 @@ TASK_BACKING: dict[str, TaskBacking] = {
         VITAFORGE_ROOT,
         "tension_strap.yml",
         (),
+    ),
+    # arm_shadow_piano (2026-11-06) is a standalone Gymnasium environment, not
+    # a BaseTask: ``env/tasks/arm_shadow_piano.py`` owns its PhysX world, its
+    # own differential IK and its own scorer, and has none of the manager
+    # objects the endpoints read.  It is branched out in init_task the same
+    # way blind_pick_balls is, and capx/serving/univtac_piano_adapter.py
+    # supplies the missing surface.  Three things worth writing down:
+    #
+    # 1. It is NOT a force task and NOT in FINAL_TASKS, so the force-task
+    #    binder must not run on it (the init_task branch returns first).
+    # 2. It carries the unscaled GelSight Mini on the index finger and the
+    #    GelSight/UIPC backend (env/tasks/_index_tactile.py) owns the gel-key
+    #    contact and the key mechanics.  Those modules import ViTaForge's TacEx
+    #    fork (tacex / tacex_assets / tacex_uipc) at module level, so the fork
+    #    must be on sys.path before ``import env.tasks.arm_shadow_piano`` binds
+    #    — hence vitforge_tacex=True.  The tactile workspace is a UIPC scene
+    #    dump; the builder puts it under the server's temp root, keyed by seed.
+    #    The gel supports white keys only (see the TASK_BACKING note and
+    #    capx/serving/piano_spec.py), so the drawn sequence is white-key only.
+    # 3. One process serves one seed.  The note sequence is drawn from the
+    #    seed here, before the task is built, and written into its TaskCfg;
+    #    the client draws the same sequence from the same number with
+    #    capx/serving/piano_spec.py.  A server started on another seed would
+    #    score notes the prompt never mentioned.
+    "arm_shadow_piano": TaskBacking(
+        VITAFORGE_ROOT,
+        "arm_shadow_piano.yml",
+        (),
+        vitforge_tacex=True,
     ),
 }
 
@@ -748,6 +778,11 @@ class GripperRequest(BaseModel):
     force_threshold: float | None = None
     use_adaptive_grasp: bool | None = None  # None → fall back to task config
     position: float | None = None  # 0.0 = fully closed, 1.0 = fully open; None → 0.0 / 1.0
+    # Newtons, not millimetres: the piano's gel-image force estimate is the
+    # servo variable, and the adapter owns the whole press recipe.  A task
+    # without that servo refuses the request instead of treating it as a
+    # depth target -- the two units must never be confused for one another.
+    press_force_N: float | None = None
 
 
 class ActionResponse(BaseModel):
@@ -795,6 +830,11 @@ class TactileResponse(BaseModel):
     # /tactile and /observation.
     left_height_roughness_mm: float | None = None
     right_height_roughness_mm: float | None = None
+    # The piano gel's force estimate (newtons) and its quality tag.  None
+    # means no press has captured a no-contact reference yet, or the task
+    # does not estimate force at all -- it is not a zero reading.
+    left_force_N: float | None = None
+    left_force_quality: str = ""
     left_rgb_base64: str = ""
     right_rgb_base64: str = ""
     left_depth_base64: str = ""
@@ -1478,7 +1518,8 @@ _POSITION_CLOSE_TOL_M = 0.001
 
 def _sim_gripper(action: str, force_threshold: float | None,
                  use_adaptive_grasp: bool | None = None,
-                 position: float | None = None) -> dict:
+                 position: float | None = None,
+                 press_force_N: float | None = None) -> dict:
     """Open or close gripper.  Uses adaptive grasp for closing (tactile feedback).
 
     Matches the expert's ``atom.close_gripper()`` / ``atom.open_gripper()``
@@ -1523,6 +1564,10 @@ def _sim_gripper(action: str, force_threshold: float | None,
         if use_adaptive_grasp is not None
         else _TASK.cfg.use_adaptive_grasp
     )
+    if press_force_N is not None:
+        # The force press owns the whole motion (approach, close, descent);
+        # the depth servo and the position close both stay out of it.
+        _use_adaptive = False
     if action == "open":
         target_pos = 1.0 if position is None else float(position)
         depth_threshold = None  # open never uses adaptive threshold
@@ -1563,6 +1608,7 @@ def _sim_gripper(action: str, force_threshold: float | None,
         success = _TASK.move(
             [Action(action="gripper", target_gripper_pos=target_pos,
                     gripper_depth_threshold=depth_threshold,
+                    gripper_press_force_N=press_force_N,
                     grasp_servo=(action == "close"
                                  and force_threshold is not None
                                  and _TASK_NAME not in _GRASP_SERVO_EXCLUDED))],
@@ -1593,7 +1639,15 @@ def _sim_gripper(action: str, force_threshold: float | None,
         detail = f"qpos={final_qpos:.4f} target={target_qpos:.4f}"
     else:
         depth = float(_TASK._tactile_manager.get_min_depth().min())
-        if adaptive_for_action and depth_threshold is not None:
+        if press_force_N is not None:
+            # The adapter's force servo reports its own verdict: it stops on
+            # the estimate it was asked for, and the depth it ends at is a
+            # consequence, not a target.
+            reached = bool(success)
+            estimate = getattr(_TASK, "_last_force_estimate", None)
+            detail = (f"force={press_force_N:.2f}N target, "
+                      f"gel reads {'n/a' if estimate is None else f'{estimate:.3f}N'}")
+        elif adaptive_for_action and depth_threshold is not None:
             # Tactile-stopped close ends at the contact qpos, not zero:
             # accept if the gel deformation reached the depth threshold.
             # The threshold must be the one this request asked for, not the
@@ -1823,6 +1877,21 @@ def _sim_get_tactile_data() -> dict:
         if left_roughness is not None:
             result["left_height_roughness_mm"] = round(left_roughness, 4)
             result["right_height_roughness_mm"] = round(right_roughness, 4)
+        # Tasks whose gel carries a calibrated force model (the piano) report
+        # the estimate itself.  Only a press captures the no-contact frame it
+        # is relative to, so before one the fields stay None -- a caller must
+        # not read that as a zero force.
+        estimator = getattr(_TASK, "gel_force_estimate", None)
+        if estimator is not None:
+            try:
+                estimate = estimator()
+            except Exception:
+                logger.warning("Gel force estimate unavailable: %s",
+                               traceback.format_exc())
+                estimate = None
+            if estimate is not None:
+                result["left_force_N"] = round(float(estimate[0]), 4)
+                result["left_force_quality"] = str(estimate[1])
         return result
     except Exception as exc:
         logger.warning("Tactile data unavailable: %s", traceback.format_exc())
@@ -2909,10 +2978,19 @@ def gripper(req: GripperRequest):
         action_log.log_action("gripper", req.model_dump(), ok=False,
                               msg="Task not initialized")
         raise HTTPException(status_code=503, detail="Task not initialized")
+    if req.press_force_N is not None and not hasattr(_TASK, "press_to_force"):
+        action_log.log_action("gripper", req.model_dump(), ok=False,
+                              msg="press_force_N is not served by this task")
+        raise HTTPException(
+            status_code=400,
+            detail="This task has no gel force servo; press_force_N is only "
+                   "served by arm_shadow_piano. Use force_threshold (mm) or a "
+                   "position close.",
+        )
     result = _run_action(
         "gripper", req.model_dump(), _MOTION_TIMEOUT,
         _sim_gripper, req.action, req.force_threshold, req.use_adaptive_grasp,
-        req.position,
+        req.position, req.press_force_N,
         detail_prefix="Gripper action failed",
     )
     return ActionResponse(**result)
@@ -2983,6 +3061,26 @@ def force_state():
         return _run_on_main(_sim_force_state, timeout=30.0)
     except TimeoutError:
         action_log.log_query_failure("force_state",
+                                     "Simulation busy — retry in a few seconds")
+        raise HTTPException(status_code=503,
+                            detail="Simulation busy — retry in a few seconds")
+
+
+@app.get("/piano_key_position")
+def piano_key_position(midi: int):
+    """Palm targets for one piano key (see the piano adapter's key_position)."""
+    if _TASK is None:
+        action_log.log_query_failure("piano_key_position", "Task not initialized")
+        raise HTTPException(status_code=503, detail="Task not initialized")
+    if not hasattr(_TASK, "key_position"):
+        raise HTTPException(status_code=404,
+                            detail=f"task '{_TASK_NAME}' exposes no key positions")
+    try:
+        return _run_on_main(_TASK.key_position, int(midi), timeout=30.0)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TimeoutError:
+        action_log.log_query_failure("piano_key_position",
                                      "Simulation busy — retry in a few seconds")
         raise HTTPException(status_code=503,
                             detail="Simulation busy — retry in a few seconds")
@@ -3420,6 +3518,83 @@ def _build_ball_task(task_config: dict, device: str, seed: int,
     return BallTaskAdapter(task)
 
 
+def _build_piano_task(task_config: dict, device: str, seed: int,
+                      cfg_overrides: list[str] | None):
+    """Construct the standalone shadow-hand piano task (``arm_shadow_piano``).
+
+    Like ``_build_ball_task``, everything the generic path in ``init_task``
+    does to a BaseTask is wrong here: this ``TaskCfg`` has no ``step_lim``,
+    ``robot``, ``use_adaptive_grasp`` or ``adaptive_grasp_depth_threshold``,
+    no ``decimation`` / ``render_frequency`` / ``obs_data_type`` /
+    ``random_texture``, and the constructor is ``Task(cfg, render_mode=...)``
+    with no ``mode="collect"``.  It is branched out before any of that.
+
+    The note sequence is drawn here from the server's seed and written into
+    the config **before it is constructed**.  Both facts matter:
+
+    * The task's ``__init__`` reads ``cfg.piano_notes`` into
+      ``_sequence_request`` and ``_set_sequence`` then uses it on construction
+      and on every reset, so a value written afterwards would never be read.
+    * ``TaskCfg.__post_init__`` adjusts the hand for tactile sensing -- the
+      finger's press angle 0.55 -> 0.50 and the wrist 25 mm up/forward for the
+      Mini housing -- but only when ``tactile`` is already true at construction
+      and the fields still hold their defaults.  Setting ``cfg.tactile`` after
+      ``TaskCfg()`` would silently keep the non-tactile geometry.
+
+    The client renders the same draw (``capx.serving.piano_spec``) into the
+    prompt.
+    """
+    import importlib
+
+    from capx.serving.piano_spec import sample_sequence
+
+    task_module = importlib.import_module("env.tasks.arm_shadow_piano")
+
+    sequence = sample_sequence(seed)
+    # One TaskCfg constructor call, so __post_init__ sees the tactile profile.
+    kwargs = dict(task_config)
+    kwargs.update(sequence.as_task_kwargs())
+    kwargs["device"] = device or "cuda:0"
+    kwargs["piano_seed"] = int(seed)
+    # The served profile is the GelSight Mini one; keep it that way even if a
+    # future edit drops the two keys from the YAML.  __post_init__ needs both
+    # at construction (see the docstring).
+    kwargs.setdefault("tactile", True)
+    kwargs.setdefault("tactile_sensor", "gsmini")
+    # The task's observer camera is its only scene view and both /observation
+    # and get_frame_shot need it; without record_video the Camera prim is
+    # never spawned.
+    kwargs["record_video"] = True
+    # UIPC dumps the gel/key scene here and recovers frame 0 on every reset.
+    # One directory per seed, under the server's temp root rather than in the
+    # repo: two seeds served by two processes must not share a world.
+    workspace = (
+        Path(tempfile.gettempdir()) / "univtac_server" / "arm_shadow_piano"
+        / f"seed_{int(seed)}" / "world")
+    workspace.parent.mkdir(parents=True, exist_ok=True)
+    kwargs["tactile_workspace"] = str(workspace)
+
+    fields = set(task_module.TaskCfg.__dataclass_fields__)
+    unknown = sorted(set(kwargs) - fields)
+    if unknown:
+        raise SystemExit(
+            f"task_config/arm_shadow_piano.yml: not a TaskCfg field of "
+            f"arm_shadow_piano: {unknown} (accepted: {sorted(fields)})")
+    cfg = task_module.TaskCfg(**kwargs)
+
+    for spec in cfg_overrides or ():
+        _apply_cfg_override(cfg, spec)
+
+    logger.info("Piano sequence for seed %s: %s / %s",
+                seed, list(sequence.midi), list(sequence.dynamics))
+    logger.info("GelSight Mini workspace: %s", workspace)
+    task = task_module.Task(cfg, render_mode="rgb_array")
+
+    from capx.serving.univtac_piano_adapter import PianoTaskAdapter
+
+    return PianoTaskAdapter(task, seed=seed)
+
+
 def init_task(task_name: str, device: str, sensor_type: str = "gsmini",
               seed: int = 0, cfg_overrides: list[str] | None = None) -> None:
     """Initialize the UniVTAC task. Must be called after Isaac Sim app is ready."""
@@ -3457,6 +3632,17 @@ def init_task(task_name: str, device: str, sensor_type: str = "gsmini",
     # and leave through the same startup sequence as the generic path.
     if task_name == "blind_pick_balls":
         _TASK = _build_ball_task(task_config, device, seed, cfg_overrides)
+        _TASK_NAME = task_name
+        logger.info("Task '%s' initialized successfully.", task_name)
+        _sim_reset(seed=seed, log=False)
+        logger.info("Startup reset complete (seed=%s).", seed)
+        _log_actor_densities()
+        return
+
+    # arm_shadow_piano is the second standalone Gymnasium task served here, for
+    # the same structural reasons; see _build_piano_task.
+    if task_name == "arm_shadow_piano":
+        _TASK = _build_piano_task(task_config, device, seed, cfg_overrides)
         _TASK_NAME = task_name
         logger.info("Task '%s' initialized successfully.", task_name)
         _sim_reset(seed=seed, log=False)
