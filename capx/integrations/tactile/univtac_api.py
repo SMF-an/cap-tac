@@ -288,10 +288,30 @@ class UniVTACTactileApi(ApiBase):
         tactile = data.get("tactile")
         if isinstance(tactile, dict):
             tactile_trace.record(path, tactile, body)
+        self._note_step(data)
         if not data.get("success", True):
             msg = data.get("message", "Unknown motion error")
             raise RuntimeError(f"Motion failed: {msg}")
         return data
+
+    def _note_step(self, data: dict) -> None:
+        """Remember the episode clock from any reply that carries it.
+
+        Every motion and tactile reply carries the physics tick count, but the
+        generated code usually drops it.  Keep the last one on the env so the
+        trial harness can still report a step count when the server is busy:
+        a wall-clock alarm can leave a motion running on its main thread, and
+        the post-trial /tactile query then times out.
+        """
+        try:
+            tactile = data.get("tactile") or {}
+            step = int(tactile.get("step", data.get("step", 0)) or 0)
+        except Exception:
+            step = 0
+        if step:
+            env = getattr(self, "_env", None)
+            if env is not None:
+                setattr(env, "_last_api_step", step)
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         try:
