@@ -23,7 +23,12 @@ api_servers:
 record_video: true
 output_dir: ./outputs/univtac_tactile_memory_match
 
-trials: 22
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
+
+trials: 23
 num_workers: 1  # Isaac Sim is not parallel-safe
 # seed = trial id, and the balanced schedule maps it through
 # ORDERED_CLASS_PAIRS[seed % 56], so trial 7 is a HARDNESS-ONLY pair
@@ -35,4 +40,4 @@ num_workers: 1  # Isaac Sim is not parallel-safe
 # rewrites them before each launch (launch.py has no CLI flag for resume_idx)
 # and leaves them pointing at whichever seed ran last.  Edit them by hand only
 # to run one seed on its own.
-resume_idx: 17
+resume_idx: 21

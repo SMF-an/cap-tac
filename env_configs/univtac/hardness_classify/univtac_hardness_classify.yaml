@@ -27,5 +27,11 @@ api_servers:
 record_video: true
 output_dir: ./outputs/univtac_hardness_classify
 
-trials: 100
-num_workers: 1  # Isaac Sim is not parallel-safe
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
+
+trials: 5
+resume_idx: 1
+num_workers: 1

@@ -163,6 +163,69 @@ def is_vlm_model(model: str) -> bool:
     return _strip_openrouter_prefix(model) in VLM_MODELS
 
 
+#: Every model call's usage since :func:`reset_token_usage` was last called.
+#: The trial harness reads the sum once per trial and writes it into the
+#: summary; the API's own usage block is the only honest source, and this is
+#: where it arrives.
+_TOKEN_USAGE: list[dict[str, int]] = []
+
+
+def _usage_from_body(body: dict) -> dict[str, int]:
+    """Normalize the usage block of either protocol into one dict.
+
+    The Responses API reports ``input_tokens`` / ``output_tokens`` and puts
+    the reasoning subset under ``output_tokens_details``; chat completions
+    reports ``prompt_tokens`` / ``completion_tokens``.  A provider that
+    reports nothing yields zeros rather than an error -- a missing usage
+    block must not fail a trial.
+    """
+    usage = body.get("usage") or {}
+    prompt_details = (
+        usage.get("input_tokens_details")
+        or usage.get("prompt_tokens_details")
+        or {}
+    )
+    completion_details = (
+        usage.get("output_tokens_details")
+        or usage.get("completion_tokens_details")
+        or {}
+    )
+    return {
+        "input_tokens": int(
+            usage.get("input_tokens") or usage.get("prompt_tokens") or 0),
+        "output_tokens": int(
+            usage.get("output_tokens") or usage.get("completion_tokens") or 0),
+        "reasoning_tokens": int(
+            completion_details.get("reasoning_tokens") or 0),
+        "cached_tokens": int(prompt_details.get("cached_tokens") or 0),
+    }
+
+
+def reset_token_usage() -> None:
+    """Forget the calls so far; the trial harness calls this at trial start."""
+    _TOKEN_USAGE.clear()
+
+
+def token_usage() -> dict[str, int]:
+    """The summed usage of every model call since the last reset.
+
+    ``output_tokens`` is the API's own output count and already includes
+    ``reasoning_tokens``, which is reported alongside it because a reasoning
+    model's visible text is only part of what it is billed for.
+    """
+    total = {
+        "calls": len(_TOKEN_USAGE),
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+    }
+    for usage in _TOKEN_USAGE:
+        for key, value in usage.items():
+            total[key] += value
+    return total
+
+
 @dataclass
 class ModelQueryArgs:
     """Arguments for querying a model."""
@@ -370,6 +433,12 @@ def query_model(args: LaunchArgs | ModelQueryArgs, prompt: list[dict]) -> str:
         out["reasoning"] = body.get("choices")[0].get("message").get("reasoning", None)
     else:
         out["reasoning"] = None
+    # The API's own count of what this call cost.  Kept on the accumulator as
+    # well as on the reply, so the trial harness can sum it without threading
+    # a return value through every caller (policy, VDM, ensemble).
+    usage = _usage_from_body(body)
+    _TOKEN_USAGE.append(usage)
+    out["usage"] = usage
     return out  # type: ignore[return-value]
 
 

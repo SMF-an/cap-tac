@@ -812,7 +812,6 @@ class UniVTACBulbTighteningPerceptionCodeEnv(UniVTACBulbTighteningCodeEnv):
         # protocol
         "channel-selection",
         "differential-across-states",
-        "grasp-verification",
         "no-absolute-without-reference",
         "regrasp-after-slip",
         "tactile-cannot-locate",

@@ -30,6 +30,8 @@ from capx.envs.tasks.base import CodeExecutionEnvBase
 from capx.llm.client import (
     ModelQueryArgs,
     is_vlm_model,
+    reset_token_usage,
+    token_usage,
 )
 from capx.llm.client import (
     query_model as _query_model,
@@ -669,6 +671,10 @@ def _run_single_trial(
         5. Save artifacts (code, logs, per-turn videos, combined video) and return a TrialSummary.
     """
     trial_start_time = time.time()
+    # Every model call this trial makes -- policy, VDM, ensemble -- is summed
+    # from here.  The summary reports the API's own usage blocks; nothing in
+    # that line is estimated from characters.
+    reset_token_usage()
 
     # Every row the tactile trace writes from here on belongs to this trial.
     # The runner executes all trials in one process, so without this the run
@@ -1005,6 +1011,17 @@ def _run_single_trial(
     if physics_step is not None:
         print(f"Trial {trial} physics steps: {physics_step}")
 
+    # The API's own token counts, summed over every model call this trial made
+    # (policy, VDM, ensemble).  reasoning_tokens is a subset of output_tokens;
+    # it is printed alongside because a reasoning model's visible text is only
+    # part of what it is billed for.
+    usage = token_usage()
+    print(
+        f"Trial {trial} tokens: input={usage['input_tokens']} "
+        f"output={usage['output_tokens']} reasoning={usage['reasoning_tokens']} "
+        f"cached={usage['cached_tokens']} calls={usage['calls']}"
+    )
+
     # Keep the per-trial wall-clock in the trial's own summary: the console
     # line is the only other place it exists, and that log lives outside the
     # experiment directory.  Summary is written before this point, so append.
@@ -1015,6 +1032,13 @@ def _run_single_trial(
             f.write(f"\nTrial {trial} took {elapsed_s:.2f} seconds\n")
             if physics_step is not None:
                 f.write(f"Trial {trial} physics steps: {physics_step}\n")
+            f.write(
+                f"Trial {trial} tokens: input={usage['input_tokens']} "
+                f"output={usage['output_tokens']} "
+                f"reasoning={usage['reasoning_tokens']} "
+                f"cached={usage['cached_tokens']} "
+                f"calls={usage['calls']}\n"
+            )
 
     gc.collect()
 
@@ -1031,6 +1055,11 @@ def _run_single_trial(
         num_regenerations=num_regenerations,
         num_finishes=num_finishes,
         num_code_blocks=num_code_blocks,
+        input_tokens=usage["input_tokens"],
+        output_tokens=usage["output_tokens"],
+        reasoning_tokens=usage["reasoning_tokens"],
+        cached_tokens=usage["cached_tokens"],
+        token_calls=usage["calls"],
     )
 
 

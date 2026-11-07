@@ -25,5 +25,8 @@ first step that does not lower it means the object has met its support.
   wedge under the object and push it out. Watch the height, not the slip.
 - Do not press after the height stops falling. The extra travel goes into the
   object or into whatever it landed on.
-- The height to aim for is computed, not discovered: the support's surface plus
-  the object's own half-height. See [[seat-height-from-plate]].
+- **The support decides the resting height.** Aim for the support's surface
+  plus the object's own half-height when its origin is at the centre
+  ([[seat-height-from-plate]]); an object that ends a little above that is
+  still placed. Do not require its centre to return to the commanded height —
+  that gate rejects valid placements ([[settle-after-release]]).

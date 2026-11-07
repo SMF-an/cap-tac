@@ -582,18 +582,19 @@ class UniVTACTactileApi(ApiBase):
 
         Args:
             force_threshold: (float, optional) Target gel deformation depth in
-                mm. Lower values = firmer/deeper grip. Below ~26.5 mm the depth
-                is one the servo can never reach on a compliant object, and the
-                close fails outright rather than stopping short. An explicit
-                value switches the close to a servoed landing: the fingers
-                micro-step onto the target and the released depth comes back
-                close to it — not exactly: 26.23, 26.32 and 26.68 were
-                measured around a 26.5 target — so check the reading against a
-                narrow band rather than one exact value. It gives up on an
-                asymmetric or wedged grasp, where the fingers stop wherever
-                they jammed. None uses the task default (firm), which is not
-                servoed, lands near 25.5 mm and varies from one close to the
-                next.
+                mm. Lower values = firmer/deeper grip. On a compliant object a
+                depth below ~26.5 mm is one the servo can never reach, and the
+                close fails outright rather than stopping short. A rigid part
+                can be taken deeper: a 20.5 target has landed at 20.16-20.75.
+                An explicit value switches the close to a servoed landing: the
+                fingers micro-step onto the target and the released depth
+                comes back close to it — not exactly: 26.23, 26.32 and 26.68
+                were measured around a 26.5 target — so check the reading
+                against a narrow band rather than one exact value. It gives up
+                on an asymmetric or wedged grasp, where the fingers stop
+                wherever they jammed. None uses the task default (firm), which
+                is not servoed, lands near 25.5 mm and varies from one close
+                to the next.
             position: (float, optional) Gripper opening percentage, 0.0 (fully
                 closed) to 1.0 (fully open). Sets the grip by finger separation
                 instead of by gel depth, which fixes the grip only where the
@@ -659,14 +660,14 @@ class UniVTACTactileApi(ApiBase):
             that is a surface that has NOT reached the pad and one below it is
             pressed into the gel.  The reading DECREASES as contact hardens:
             ~27.8-29 mm is the gel-face band, where a light grasp and a
-            close that met nothing both read — the contact flags are up in
-            either case, and only the marker displacement separates them
-            (under 0.01 px for the empty close; a real grasp moves them
-            1.5 px or more.  A pad that has touched nothing still reports a
-            few thousandths of a pixel, so test a threshold — anything
-            above ~1 px is contact — and never "nonzero") — ~24 mm is the
-            sensor's floor (the camera's window ends there), and the reading
-            saturates there.  Returning to 34 mm
+            close that caught nothing both read — the contact flags are up
+            in either case, and only the marker displacement separates
+            them.  A pad that has touched nothing still reports a few
+            thousandths of a pixel, so read the field as a magnitude above
+            a noise floor, never as "nonzero" — the reading also falls
+            below 24 mm: a rigid part squeezed hard between the pads reads
+            in the low 20s (a 20.5 target has landed at 20.16-20.75).
+            Returning to 34 mm
             means the pads are
             open, which is the same reading whether the object was never held,
             was set down, or was dropped — the field answers whether something

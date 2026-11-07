@@ -6,8 +6,11 @@ on both fingertips. The API is described below.
 
 Goal: Grasp the prism, use tactile sensing to determine whether its surface
 texture is rough or smooth, and gently place it on the matching pad:
-  - Rough texture → orange pad
-  - Smooth texture → green pad
+  - Rough texture -> the orange_pad
+  - Smooth texture -> the green_pad
+
+In the scene the prism is named "prism" and the pads "orange_pad" and
+"green_pad" - use those exact names with the pose and grasp helpers.
 
 Key rules:
 - Texture is read from the gel's marker-image anisotropy (get_tactile_data),

@@ -2,7 +2,7 @@
 id: S4
 name: grip-force-by-mass
 family: sense
-summary: Pick the closing force from the mass — the 15 mm block shears at ~28.5 and stops shearing by ~26.
+summary: Pick the closing force from the mass — at ~28.5 the 15 mm block's two-pad shear difference between resting and lifted 3 cm reads 0.7-1.0 px heavy vs under 0.05 px light, split 0.2 px; by ~26 the shear stops.
 task_types: []
 tasks: [weight_classify]
 channels: [shear]

@@ -51,7 +51,10 @@ CORE = {
     "contact-flag-is-range",
     "one-call-approach",
     "reflex-stop-on-events",
-    "grasp-verification",
+    # grasp-verification is not core: its 28.3 / ~1 px close test was measured
+    # on blind_pick's firm search grasp and rejects valid light squeezes (weight
+    # weighing grip 0.64/0.67 px, hardness 0.10 close 0.85/1.02 px), so it is
+    # routed to blind_pick by task name instead.
     "tactile-cannot-locate",
 }
 
