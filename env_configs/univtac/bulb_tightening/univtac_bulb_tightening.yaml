@@ -121,3 +121,8 @@ output_dir: ./outputs/univtac_bulb_tightening
 trials: 19
 resume_idx: 19
 num_workers: 1  # Isaac Sim is not parallel-safe
+
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions

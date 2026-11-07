@@ -40,6 +40,11 @@ RESPONSES_MODELS = [
     "gpt-6-astra",
 ]
 VLM_MODELS = [
+    # The gpt-6 line is Responses-only (see RESPONSES_MODELS above) but it is
+    # still a vision-language model, and the piano task's visual-differencing
+    # channel names it.  A name missing here fails the trial on an assertion
+    # before the first action, which is how this entry was found missing.
+    "gpt-6-astra",
     "google/gemini-3.1-pro-preview",
     "google/gemini-2.5-flash-lite",
     "anthropic/claude-opus-4-5",
