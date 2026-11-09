@@ -1,0 +1,48 @@
+# ViTaForge: hardness_classify, cross-seed trace experiment.
+#
+# Same task and API as univtac_hardness_classify.yaml; the class changes what
+# is delivered:
+#   * the frozen original-21 library's route for this task (6 skills): the
+#     hardness split (hardness-two-closes, 1.2 mm), the depth scale, the load
+#     response, the shear channel, the servo caveat and the shared classify
+#     rule (gel-shear-weight);
+#   * no approach, transport or placement rule -- the old library has none, and
+#     that procedure is what the trace is meant to teach.
+#
+# Run one seed per process, in order, with --trace-mode last:
+#   bash scripts/run_trace_chain.sh hardness_classify 1 30 <model> 8120 12000 \
+#       env_configs/univtac/hardness_classify/univtac_hardness_classify_trace.yaml
+#
+# The server must already be running on the same task.  One process serves
+# every seed: the soft/hard draw is re-made in _reset_actors from the reset
+# seed, so no per-seed restart is needed.
+#   bash scripts/launch_univtac_server.sh hardness_classify 8120 <gpu> 0
+
+env:
+  _target_: capx.envs.tasks.tactile.univtac_hardness_classify.UniVTACHardnessClassifyTraceCodeEnv
+  cfg:
+    _target_: capx.envs.tasks.base.CodeExecEnvConfig
+    low_level: env_configs/univtac/hardness_classify/low_level_hardness_classify.yaml
+    privileged: false
+    apis:
+      - UniVTACTactileApi
+
+api_servers:
+  - _target_: capx.serving.launch_univtac_server.main
+    task: hardness_classify
+    port: 8120
+    host: 127.0.0.1
+
+record_video: true
+# Its own directory: the standard run of this task lives in
+# ./outputs/univtac_hardness_classify and must not be overwritten.
+output_dir: ./outputs/univtac_hardness_classify_trace
+
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
+
+trials: 5
+resume_idx: 1
+num_workers: 1  # Isaac Sim is not parallel-safe

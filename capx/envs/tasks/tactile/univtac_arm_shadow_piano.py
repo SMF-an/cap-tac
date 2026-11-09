@@ -38,6 +38,22 @@ A wrong key ends the episode, and a note that is never released does not count.
 Write ONLY executable Python code (no code fences). Import numpy if needed.
 """
 
+# The trace arm keeps the task's own wording -- the goal sentence already
+# carries this seed's notes and dynamics, and the prompt already points at the
+# one skill the frozen original-21 library routes here.  It adds the rule the
+# other arms needed (the program runs unattended) and asks for the per-press
+# estimate to be printed: this task's check detail is the task's own ``_info``,
+# whose fields are mostly outside the trace allowlist, so the previous
+# attempt's stdout is where the next seed can see what was measured.
+PROMPT_TRACE = PROMPT.replace(
+    "Write ONLY executable Python code",
+    "The program runs unattended: nothing can be typed in, and input() is not\n"
+    "available. Print the force estimate each press stopped at, so a later\n"
+    "attempt can see what was measured.\n\n"
+    "Write ONLY executable Python code",
+)
+assert PROMPT_TRACE != PROMPT, "PROMPT_TRACE lost its anchor; update the marker"
+
 ORACLE_TEMPLATE = """
 import math
 
@@ -121,6 +137,7 @@ class UniVTACArmShadowPianoCodeEnv(CodeExecutionEnvBase):
     task's notes from (capx/serving/piano_spec.py).
     """
 
+    prompt_template = PROMPT
     prompt = PROMPT.format(goal=goal_sentence(sample_sequence(0)))
     # No progress or score tool is delivered.  The model plays the sequence in
     # order and verifies each press through the gel, as it plans any other
@@ -138,7 +155,8 @@ class UniVTACArmShadowPianoCodeEnv(CodeExecutionEnvBase):
     def reset(self, *, seed=None, options=None):
         obs, info = super().reset(seed=seed, options=options)
         self._sequence = sample_sequence(0 if seed is None else seed)
-        self._task_prompt = PROMPT.format(goal=goal_sentence(self._sequence))
+        self._task_prompt = self.prompt_template.format(
+            goal=goal_sentence(self._sequence))
         self._full_prompt = [
             {"role": "system", "content": self._system_prompt},
             {"role": "user",
@@ -147,3 +165,36 @@ class UniVTACArmShadowPianoCodeEnv(CodeExecutionEnvBase):
         obs["full_prompt"] = copy.deepcopy(self._full_prompt)
         info["task_prompt"] = self._task_prompt
         return obs, info
+
+
+class UniVTACArmShadowPianoTraceCodeEnv(UniVTACArmShadowPianoCodeEnv):
+    """The cross-seed trace experiment on arm_shadow_piano.
+
+    What transfers between seeds is the playing procedure: the note sequence
+    and each note's dynamic are drawn from the seed (``capx/serving/piano_spec``),
+    so a program that carries the previous attempt's notes is wrong by
+    construction, while the press primitive -- approach, servo on the gel's
+    force estimate, unload before opening -- is the same on every seed.
+
+    The delivered set is the one skill the frozen original-21 library names
+    for this task (``piano-gel-force-band``): the force target for each
+    dynamic and what the estimate does at the top of its range.  The library's
+    taxonomy routes the task to the ``force`` family for the config test, but
+    its own comment says the env class names exactly that one skill, because
+    none of the family's grasp / carry / load rules describes a single-finger
+    key press.
+
+    The frozen manifest records this skill as excluded from its own DIGIT
+    runtime, where ``left_force_N`` and ``close_gripper(press_force_N=...)``
+    do not exist.  This harness serves exactly those fields on the GelSight
+    Mini / UIPC rig the skill was measured on, so the exclusion does not
+    apply here.
+
+    What is left to learn is the procedure around the press: how to move
+    between keys without dragging the pad, when to release, and how to order
+    the sequence.
+    """
+
+    prompt_template = PROMPT_TRACE
+    prompt = PROMPT_TRACE.format(goal=goal_sentence(sample_sequence(0)))
+    tactile_skills = ("piano-gel-force-band",)

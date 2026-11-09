@@ -1,0 +1,49 @@
+# ViTaForge: weight_classify, cross-seed trace experiment.
+#
+# Same task and API as univtac_weight_classify.yaml; the class changes what is
+# delivered:
+#   * the frozen original-21 library's route for this task (7 skills): the
+#     weight split (grip-force-by-mass, 0.2 px), the weigh-by-lift protocol
+#     (weigh-grasp-by-lift), the shear channel (gel-shear-weight,
+#     shear-vs-displacement), the depth scale, the load response and the servo
+#     caveat;
+#   * no approach, transport or placement rule -- the old library has none, and
+#     that procedure is what the trace is meant to teach.
+#
+# Run one seed per process, in order, with --trace-mode last:
+#   bash scripts/run_trace_chain.sh weight_classify 1 30 <model> 8120 12000 \
+#       env_configs/univtac/weight_classify/univtac_weight_classify_trace.yaml
+#
+# The server must already be running on the same task.  One process serves
+# every seed: the light/heavy draw is re-made in _reset_actors from the reset
+# seed, so no per-seed restart is needed.
+#   bash scripts/launch_univtac_server.sh weight_classify 8120 <gpu> 0
+
+env:
+  _target_: capx.envs.tasks.tactile.univtac_weight_classify.UniVTACWeightClassifyTraceCodeEnv
+  cfg:
+    _target_: capx.envs.tasks.base.CodeExecEnvConfig
+    low_level: env_configs/univtac/weight_classify/low_level_weight_classify.yaml
+    privileged: false
+    apis:
+      - UniVTACTactileApi
+
+api_servers:
+  - _target_: capx.serving.launch_univtac_server.main
+    task: weight_classify
+    port: 8120
+    host: 127.0.0.1
+
+record_video: true
+# Its own directory: the standard run of this task lives in
+# ./outputs/univtac_weight_classify and must not be overwritten.
+output_dir: ./outputs/univtac_weight_classify_trace
+
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
+
+trials: 5
+resume_idx: 1
+num_workers: 1  # Isaac Sim is not parallel-safe

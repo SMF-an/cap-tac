@@ -530,6 +530,22 @@ def test_an_empty_tuple_turns_the_block_off() -> None:
     assert _StubTask("weight_classify", tactile_skills=())._tactile_skill_block() == ""
 
 
+def test_the_global_switch_turns_every_skill_off() -> None:
+    """The trace experiment withholds the whole block, not just task-specific
+    recipes, so a prompt can be run without any procedural knowledge."""
+    stub = _StubTask("weight_classify")
+    stub.cfg.deliver_tactile_skills = False
+    assert stub._tactile_skill_block() == ""
+
+
+def test_the_global_switch_beats_an_explicit_list() -> None:
+    """A task that names skills by hand still receives none when the run has
+    asked for none -- otherwise the block would be half present."""
+    stub = _StubTask("weight_classify", tactile_skills=("depth-grip-scale",))
+    stub.cfg.deliver_tactile_skills = False
+    assert stub._tactile_skill_block() == ""
+
+
 class _API:
     """Enough of an API object to answer what the hook asks it."""
 
@@ -573,6 +589,7 @@ def test_verbose_switches_to_the_bodies() -> None:
         "bulb_tightening", tactile_skills=True, tactile_skills_verbose=True
     )._tactile_skill_block()
     assert "## How" in verbose
+    assert "[[" not in verbose, "library cross-references leaked into the prompt"
 
 
 def test_the_complete_prompt_carries_the_block_after_the_apis() -> None:
@@ -593,7 +610,7 @@ def test_the_complete_prompt_carries_the_block_after_the_apis() -> None:
 
 
 def test_the_only_hook_override_is_the_perception_bulb_variant() -> None:
-    """The taxonomy is the routing table, with two deliberate exceptions.
+    """The taxonomy is the routing table, with three deliberate exceptions.
 
     The bulb's perception config must not be handed `bulb-grasp-pose`: that
     skill's recipe is the server's ground-truth grasp branch
@@ -608,7 +625,13 @@ def test_the_only_hook_override_is_the_perception_bulb_variant() -> None:
     written for it instead of letting type-routing hand it the strap and bulb
     recipes.
 
-    Nothing else opts out or names skills, so a third override appearing here
+    The trace experiment (2026-11-08) names the frozen original-21 library's
+    route for each task, matching the sibling study's initial delivery.  The
+    old library carries the task's judgment constants; what the trace is meant
+    to teach is the procedure around them (grasp, transport, placement,
+    wrist reset, search).
+
+    Nothing else opts out or names skills, so another override appearing here
     is a decision, not a drift.
     """
     from capx.envs.tasks import tactile as tactile_tasks
@@ -626,7 +649,15 @@ def test_the_only_hook_override_is_the_perception_bulb_variant() -> None:
 
     assert set(declared) == {
         "UniVTACBulbTighteningPerceptionCodeEnv",
+        "UniVTACBulbTighteningTraceCodeEnv",
         "UniVTACArmShadowPianoCodeEnv",
+        "UniVTACArmShadowPianoTraceCodeEnv",
+        "UniVTACBlindPickBallsTraceCodeEnv",
+        "UniVTACGraspClassifyTraceCodeEnv",
+        "UniVTACHardnessClassifyTraceCodeEnv",
+        "UniVTACTactileMemoryMatchTraceCodeEnv",
+        "UniVTACTensionStrapTraceCodeEnv",
+        "UniVTACWeightClassifyTraceCodeEnv",
     }, declared
     assert declared["UniVTACArmShadowPianoCodeEnv"] == (
         "piano-gel-force-band",), declared["UniVTACArmShadowPianoCodeEnv"]
@@ -635,6 +666,242 @@ def test_the_only_hook_override_is_the_perception_bulb_variant() -> None:
     )._tactile_skill_block()
     assert "piano-gel-force-band" in piano_block, piano_block
     assert "bulb-close-force" not in piano_block, piano_block
+
+    # The trace arms deliver the frozen original-21 library's route for their
+    # task -- the same initial delivery as the sibling study
+    # (capx/tactile_skills/initial_libraries/original-21-3758efb).  What the
+    # trace is meant to teach is the procedure around those readings.
+    trace_names = set(declared["UniVTACGraspClassifyTraceCodeEnv"])
+    assert trace_names == {
+        "depth-grip-scale",
+        "follow-is-signal",
+        "gel-shear-weight",
+        "position-mode-for-yield",
+        "shear-vs-displacement",
+        "texture-slope-two-grips",
+    }, trace_names
+    trace_block = _StubTask(
+        "grasp_classify",
+        tactile_skills=tuple(trace_names),
+    )._tactile_skill_block()
+    assert "texture-slope-two-grips" in trace_block
+    assert "force_threshold 27.5 and 20.5" in trace_block
+    assert "split 0.06" in trace_block, "the frozen split must survive"
+    assert "depth-grip-scale" in trace_block
+    assert "[[" not in trace_block, "unresolvable cross-references reached the prompt"
+
+    # The task prompt must say the run is unattended: without it the model
+    # asked the operator for calibration slopes and blocked the chain.  The
+    # placement promise is rewritten because the old library has no place
+    # family.
+    from capx.envs.tasks.tactile.univtac_grasp_classify import (
+        UniVTACGraspClassifyTraceCodeEnv,
+    )
+
+    trace_prompt = UniVTACGraspClassifyTraceCodeEnv.prompt
+    assert "unattended" in trace_prompt
+    assert "input()" in trace_prompt
+    assert "The placement recipe" not in trace_prompt
+    assert "worked out from your attempts" in trace_prompt
+
+    # weight_classify keeps the old library's seven: the weight split, the
+    # weigh-by-lift protocol, the shear channel and the shared classify rules.
+    # Its prompt's placement promise is rewritten for the same reason.
+    from capx.envs.tasks.tactile.univtac_weight_classify import (
+        PROMPT_TRACE as WEIGHT_PROMPT_TRACE,
+        UniVTACWeightClassifyTraceCodeEnv,
+    )
+
+    weight_names = set(declared["UniVTACWeightClassifyTraceCodeEnv"])
+    assert weight_names == {
+        "depth-grip-scale",
+        "follow-is-signal",
+        "gel-shear-weight",
+        "grip-force-by-mass",
+        "position-mode-for-yield",
+        "shear-vs-displacement",
+        "weigh-grasp-by-lift",
+    }, weight_names
+    weight_block = _StubTask(
+        "weight_classify", tactile_skills=tuple(weight_names)
+    )._tactile_skill_block()
+    assert "split 0.2 px" in weight_block, "the frozen weight split must survive"
+    assert "weigh-grasp-by-lift" in weight_block
+    assert "[[" not in weight_block
+    assert "unattended" in WEIGHT_PROMPT_TRACE and "input()" in WEIGHT_PROMPT_TRACE
+    assert "The placement recipe" not in WEIGHT_PROMPT_TRACE
+    assert "worked out from your attempts" in WEIGHT_PROMPT_TRACE
+
+    # hardness_classify keeps the old library's six, including its 1.2 mm
+    # two-close split.
+    from capx.envs.tasks.tactile.univtac_hardness_classify import (
+        PROMPT_TRACE as HARDNESS_PROMPT_TRACE,
+        UniVTACHardnessClassifyTraceCodeEnv,
+    )
+
+    hardness_names = set(declared["UniVTACHardnessClassifyTraceCodeEnv"])
+    assert hardness_names == {
+        "depth-grip-scale",
+        "follow-is-signal",
+        "gel-shear-weight",
+        "hardness-two-closes",
+        "position-mode-for-yield",
+        "shear-vs-displacement",
+    }, hardness_names
+    hardness_block = _StubTask(
+        "hardness_classify", tactile_skills=tuple(hardness_names)
+    )._tactile_skill_block()
+    assert "split 1.2" in hardness_block, "the frozen hardness split must survive"
+    assert "[[" not in hardness_block
+    assert "unattended" in HARDNESS_PROMPT_TRACE and "input()" in HARDNESS_PROMPT_TRACE
+    assert "The placement recipe" not in HARDNESS_PROMPT_TRACE
+    assert "worked out from your attempts" in HARDNESS_PROMPT_TRACE
+
+    # arm_shadow_piano names exactly the one skill the frozen library has for
+    # it; the taxonomy's force route is bypassed by the class, as the
+    # library's own comment says.
+    from capx.envs.tasks.tactile.univtac_arm_shadow_piano import (
+        PROMPT_TRACE as PIANO_PROMPT_TRACE,
+        UniVTACArmShadowPianoTraceCodeEnv,
+    )
+
+    assert declared["UniVTACArmShadowPianoTraceCodeEnv"] == (
+        "piano-gel-force-band",), declared["UniVTACArmShadowPianoTraceCodeEnv"]
+    piano_trace_block = _StubTask(
+        "arm_shadow_piano", tactile_skills=("piano-gel-force-band",)
+    )._tactile_skill_block()
+    assert "0.35 N light and 0.50 N heavy" in piano_trace_block
+    assert "[[" not in piano_trace_block
+    assert "unattended" in PIANO_PROMPT_TRACE and "input()" in PIANO_PROMPT_TRACE
+    assert UniVTACArmShadowPianoTraceCodeEnv.prompt_template is PIANO_PROMPT_TRACE
+
+    # memory_match keeps six of the old library's seven: the one-grasp
+    # protocol, its 0.02 texture split, the depth scale, the load channel and
+    # the servo caveat.  ``gel-shear-weight`` is the deliberate deviation --
+    # this task's weight axis is follow/sag, never shear, so the old library's
+    # rule would contradict ``follow-is-signal`` in the same block.
+    from capx.envs.tasks.tactile.univtac_tactile_memory_match import (
+        PROMPT_TRACE,
+        UniVTACTactileMemoryMatchTraceCodeEnv,
+    )
+
+    mm_names = set(declared["UniVTACTactileMemoryMatchTraceCodeEnv"])
+    assert mm_names == {
+        "can-texture-difference",
+        "depth-grip-scale",
+        "follow-is-signal",
+        "memory-match-one-grasp",
+        "position-mode-for-yield",
+        "shear-vs-displacement",
+    }, mm_names
+    mm_block = _StubTask(
+        "tactile_memory_match", tactile_skills=tuple(mm_names)
+    )._tactile_skill_block()
+    assert "0.02" in mm_block, "the frozen split must survive"
+    assert "0.50" in mm_block and "0.25" in mm_block, "the one-grasp protocol must survive"
+    assert "gel-shear-weight" not in mm_block, "the contradicting weight rule leaked"
+    assert "world-frame-transport" not in mm_block
+    assert "[[" not in mm_block, "unresolvable cross-reference reached the prompt"
+    assert "unattended" in PROMPT_TRACE and "input()" in PROMPT_TRACE
+    assert "one-grasp protocol" in PROMPT_TRACE
+
+    # tension_strap keeps the gauge and the two control recipes, as the frozen
+    # library does; the old library has no approach, grip or recovery rule.
+    from capx.envs.tasks.tactile.univtac_tension_strap import (
+        PROMPT_TRACE as STRAP_PROMPT_TRACE,
+        UniVTACTensionStrapTraceCodeEnv,
+    )
+
+    strap_names = set(declared["UniVTACTensionStrapTraceCodeEnv"])
+    assert strap_names == {
+        "depth-grip-scale",
+        "shear-vs-displacement",
+        "strap-grasp-and-ramp",
+        "strap-hold-creeps",
+        "strap-load-is-shear-difference",
+    }, strap_names
+    strap_block = _StubTask(
+        "tension_strap", tactile_skills=tuple(strap_names)
+    )._tactile_skill_block()
+    assert "0.93" in strap_block, "the gauge must keep its calibration"
+    assert "strap-grasp-and-ramp" in strap_block
+    assert "strap-hold-creeps" in strap_block
+    assert "one-call-approach" not in strap_block
+    assert "[[" not in strap_block
+    assert "unattended" in STRAP_PROMPT_TRACE and "input()" in STRAP_PROMPT_TRACE
+    # The trace class must re-render its own wording, not the base template.
+    assert UniVTACTensionStrapTraceCodeEnv.prompt_template is STRAP_PROMPT_TRACE
+
+    # bulb_tightening keeps the old library's six: the direction legs, the
+    # shear-to-mm conversion, the lead formula, the seat rule, the depth scale
+    # and the channel rule.  The wrist-reset recipe is not in the old library,
+    # so that one prompt promise stays rewritten.
+    from capx.envs.tasks.tactile.univtac_bulb_tightening import (
+        PROMPT_TRACE as BULB_PROMPT_TRACE,
+        UniVTACBulbTighteningTraceCodeEnv,
+    )
+
+    bulb_names = set(declared["UniVTACBulbTighteningTraceCodeEnv"])
+    assert bulb_names <= set(default_library().skills), bulb_names - set(default_library().skills)
+    assert bulb_names == {
+        "depth-grip-scale",
+        "lead-by-overshoot",
+        "mirrored-shear-slide",
+        "seat-by-slide-collapse",
+        "shear-vs-displacement",
+        "thread-direction-by-legs",
+    }, bulb_names
+    bulb_block = _StubTask(
+        "bulb_tightening", tactile_skills=tuple(bulb_names)
+    )._tactile_skill_block()
+    assert "lead-by-overshoot" in bulb_block
+    assert "seat-by-slide-collapse" in bulb_block
+    assert "thread-direction-by-legs" in bulb_block
+    assert "mirrored-shear-slide" in bulb_block
+    assert "18 px/mm" in bulb_block, "the channel calibration must survive"
+    assert "wrist-limit-segmentation" not in bulb_block
+    assert "bulb-close-force" not in bulb_block
+    assert "27.2" not in bulb_block, "the grasp recipe is not in the old library"
+    assert "[[" not in bulb_block
+    assert "unattended" in BULB_PROMPT_TRACE and "input()" in BULB_PROMPT_TRACE
+    # The direction, lead and seat promises are true; the wrist-reset promise
+    # is not, and stays rewritten.
+    assert "The skills below give the method" in BULB_PROMPT_TRACE
+    assert "the tactile skills at the end of this prompt" in BULB_PROMPT_TRACE
+    assert "how to re-set it, and when to stop, are yours to" in BULB_PROMPT_TRACE
+    assert "the skills below give the reset sequence" not in BULB_PROMPT_TRACE
+    assert "when to stop re-setting" not in BULB_PROMPT_TRACE
+    assert UniVTACBulbTighteningTraceCodeEnv.prompt is BULB_PROMPT_TRACE
+
+    # blind_pick_balls keeps the old library's four: the depth scale, the
+    # channel rule, the material reading with its 0.06 bar, and the wide-pad
+    # fact.  Search, transport and placement are not in the old library.
+    from capx.envs.tasks.tactile.univtac_blind_pick_balls import (
+        PROMPT_TRACE as BALLS_PROMPT_TRACE,
+        UniVTACBlindPickBallsTraceCodeEnv,
+    )
+
+    balls_names = set(declared["UniVTACBlindPickBallsTraceCodeEnv"])
+    assert balls_names <= set(default_library().skills), balls_names - set(default_library().skills)
+    assert balls_names == {
+        "depth-grip-scale",
+        "shear-vs-displacement",
+        "texture-in-relief",
+        "wide-pads-see-nothing",
+    }, balls_names
+    balls_block = _StubTask(
+        "blind_pick_balls", tactile_skills=tuple(balls_names)
+    )._tactile_skill_block()
+    assert "texture-in-relief" in balls_block
+    assert "0.06" in balls_block, "the frozen material bar must survive"
+    assert "search-continues-after-miss" not in balls_block
+    assert "lift-before-lateral" not in balls_block
+    assert "world-frame-transport" not in balls_block
+    assert "z≈0.28" not in balls_block, "the cruise height leaked"
+    assert "wide-pads-see-nothing" in balls_block
+    assert "[[" not in balls_block
+    assert "unattended" in BALLS_PROMPT_TRACE and "input()" in BALLS_PROMPT_TRACE
+    assert UniVTACBlindPickBallsTraceCodeEnv.prompt is BALLS_PROMPT_TRACE
 
     named = set(declared["UniVTACBulbTighteningPerceptionCodeEnv"])
     routed = {s.name for s in default_library().for_task("bulb_tightening")}

@@ -1,0 +1,46 @@
+# UniVTAC: grasp_classify, cross-seed trace experiment.
+#
+# Same task and API as univtac_grasp_classify.yaml; the class changes what is
+# delivered:
+#   * the frozen original-21 library's route for this task (6 skills): the
+#     texture calibration with its 0.06 split, the depth scale, the two
+#     channel rules and the two servo caveats;
+#   * no placement recipes (the old library has no place family) -- placement
+#     is learned from the trace and the check detail.  The prompt's placement
+#     promise is rewritten to match.
+#
+# Run one seed per process, in order, with --trace-mode last:
+#   bash scripts/run_trace_chain.sh grasp_classify 1 30 <model> 8120 12000 \
+#       env_configs/univtac/grasp_classify/univtac_grasp_classify_trace.yaml
+#
+# The server must already be running on the same task:
+#   bash scripts/launch_univtac_server.sh grasp_classify 8120 <gpu> 0
+
+env:
+  _target_: capx.envs.tasks.tactile.univtac_grasp_classify.UniVTACGraspClassifyTraceCodeEnv
+  cfg:
+    _target_: capx.envs.tasks.base.CodeExecEnvConfig
+    low_level: env_configs/univtac/grasp_classify/low_level_grasp_classify.yaml
+    privileged: false
+    apis:
+      - UniVTACTactileApi
+
+api_servers:
+  - _target_: capx.serving.launch_univtac_server.main
+    task: grasp_classify
+    port: 8120
+    host: 127.0.0.1
+
+record_video: true
+# Its own directory: the baseline run of the same task (full skill library)
+# lives in ./outputs/univtac_grasp_classify and must not be overwritten.
+output_dir: ./outputs/univtac_grasp_classify_trace
+
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
+
+trials: 5
+resume_idx: 1
+num_workers: 1  # Isaac Sim is not parallel-safe

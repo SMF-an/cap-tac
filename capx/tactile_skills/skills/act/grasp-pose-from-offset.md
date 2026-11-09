@@ -5,8 +5,10 @@ family: act
 summary: For an object the hand was not above on the first call, build the grasp pose from a measured offset instead.
 task_types: [classify, insert, manipulate, wipe]
 # sample_grasp_pose is withdrawn on the balls line, so there is no measured
-# offset to build a pose from.
-not_tasks: [blind_pick_balls]
+# offset to build a pose from.  On memory_match it is not cached at all: the
+# task rebuilds each can's pose from that can's live pose, so there is nothing
+# to work around and hand-built poses miss the can ([[grasp-pose-per-can]]).
+not_tasks: [blind_pick_balls, tactile_memory_match]
 channels: []
 objects: any object the pre-move did not leave the hand above
 evidence: The API caches the hand-relative offset on the first sample_grasp_pose call, so for any other object it returns a pose at the hand's own location — above whatever was handled last.

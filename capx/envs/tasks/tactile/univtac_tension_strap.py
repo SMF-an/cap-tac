@@ -344,8 +344,13 @@ class UniVTACTensionStrapCodeEnv(CodeExecutionEnvBase):
     the prompt, the instruction the model reads and the oracle's own targets
     are all re-rendered in ``reset`` from the trial id, which is the same seed
     the server configured the task's acceptance limits from.
+
+    ``prompt_template`` is what ``reset`` re-renders; ``prompt`` is the seed-0
+    render, kept because the base class reads it once at construction.  A
+    subclass that wants different wording overrides both.
     """
 
+    prompt_template = PROMPT
     prompt = PROMPT.format(goal=goal_sentence(sample_sequence(0)))
 
     def __init__(self, cfg) -> None:
@@ -359,7 +364,9 @@ class UniVTACTensionStrapCodeEnv(CodeExecutionEnvBase):
     def reset(self, *, seed=None, options=None):
         obs, info = super().reset(seed=seed, options=options)
         self._sequence = sample_sequence(0 if seed is None else seed)
-        self._task_prompt = PROMPT.format(goal=goal_sentence(self._sequence))
+        self._task_prompt = self.prompt_template.format(
+            goal=goal_sentence(self._sequence)
+        )
         self._full_prompt = [
             {"role": "system", "content": self._system_prompt},
             {"role": "user",
@@ -368,3 +375,46 @@ class UniVTACTensionStrapCodeEnv(CodeExecutionEnvBase):
         obs["full_prompt"] = copy.deepcopy(self._full_prompt)
         info["task_prompt"] = self._task_prompt
         return obs, info
+
+
+# The trace arm keeps the task's own wording -- the goal sentence already
+# carries this seed's force/time pair, and the prompt never named a control
+# constant -- and adds the rule the other arms needed: the program runs
+# unattended, and it should print what it acted on so the next seed can read it.
+PROMPT_TRACE = PROMPT.replace(
+    "Write ONLY executable Python code",
+    "The program runs unattended: nothing can be typed in, and input() is not\n"
+    "available. Print the heights and readings you act on, so a later attempt\n"
+    "can see them.\n\n"
+    "Write ONLY executable Python code",
+)
+assert PROMPT_TRACE != PROMPT, "PROMPT_TRACE lost its anchor; update the marker"
+
+
+class UniVTACTensionStrapTraceCodeEnv(UniVTACTensionStrapCodeEnv):
+    """The cross-seed trace experiment on tension_strap.
+
+    This task is a control problem, not a classification one: what transfers
+    between seeds is a procedure.  The band modulus is drawn per seed, so a
+    program that carries a height or a stiffness is wrong on the next seed by
+    construction; a program that measures the gain in-episode and ramps is
+    right on all of them.  That is exactly the kind of thing a previous
+    attempt's program can teach.
+
+    The delivered set is the frozen original-21 library's route for this task
+    (five skills): the gauge (``strap-load-is-shear-difference``), the two
+    control recipes (``strap-grasp-and-ramp``, ``strap-hold-creeps``), the
+    depth scale and the channel rule.  The old library has no approach, grip
+    or recovery rule -- the grasp itself, staying on the tab and surviving a
+    refused motion are what the trace can teach.
+    """
+
+    prompt_template = PROMPT_TRACE
+    prompt = PROMPT_TRACE.format(goal=goal_sentence(sample_sequence(0)))
+    tactile_skills = (
+        "depth-grip-scale",
+        "shear-vs-displacement",
+        "strap-grasp-and-ramp",
+        "strap-hold-creeps",
+        "strap-load-is-shear-difference",
+    )

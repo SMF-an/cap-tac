@@ -32,6 +32,30 @@ degrees.
 Write ONLY executable Python code (no code fences). Import numpy if needed.
 """
 
+# The trace arm delivers the frozen original-21 library's routed set (seven
+# skills): the weight split (``grip-force-by-mass``, 0.2 px), the weigh-by-lift
+# protocol (``weigh-grasp-by-lift``), the shear channel (``gel-shear-weight``,
+# ``shear-vs-displacement``) and the shared classify rules.  The old library
+# has no placement family, so the prompt's placement promise is rewritten; the
+# unattended paragraph is this harness's own requirement, and the printing
+# request exists because this task's check detail carries no measurement -- the
+# previous attempt's stdout is the only place a later seed can see what the gel
+# read.
+PROMPT_TRACE = PROMPT.replace(
+    "The placement recipe - how to\n"
+    "move a held block, where to stop, and whether to let go - is in those same\n"
+    "skills.",
+    "How to move a held block, where to stop, and whether to let go\n"
+    "have to be worked out from your attempts.",
+).replace(
+    "Write ONLY executable Python code",
+    "The program runs unattended: nothing can be typed in, and input() is not\n"
+    "available. Print the grip you command, the gel readings you act on, and what\n"
+    "you concluded from them, so a later attempt can see them.\n\n"
+    "Write ONLY executable Python code",
+)
+assert PROMPT_TRACE != PROMPT, "PROMPT_TRACE lost its anchor; update the marker"
+
 ORACLE_CODE = """
 import time
 
@@ -151,3 +175,34 @@ check_success()
 class UniVTACWeightClassifyCodeEnv(CodeExecutionEnvBase):
     prompt = PROMPT
     oracle_code = ORACLE_CODE
+
+
+class UniVTACWeightClassifyTraceCodeEnv(UniVTACWeightClassifyCodeEnv):
+    """The cross-seed trace experiment on weight_classify.
+
+    The task's difficulty is the measuring procedure, not one number: the
+    block has to be taken at a grip light enough that the hanging load shears
+    the pads, lifted until it actually hangs, and read as the two pads' shear
+    difference -- a single raw reading means nothing.
+
+    The delivered set is the frozen original-21 library's route for this task
+    (seven skills): the weight split (``grip-force-by-mass``, 0.2 px), the
+    weigh-by-lift protocol (``weigh-grasp-by-lift``), the shear channel
+    (``gel-shear-weight``, ``shear-vs-displacement``), the depth scale, the
+    load response (``follow-is-signal``) and the servo caveat.
+
+    What is left to learn is the procedure around the measurement: where to
+    grasp, how to carry, and how to set the block down without dragging it off
+    the plate.  The old library has no ``place`` family and no approach rules.
+    """
+
+    prompt = PROMPT_TRACE
+    tactile_skills = (
+        "depth-grip-scale",
+        "follow-is-signal",
+        "gel-shear-weight",
+        "grip-force-by-mass",
+        "position-mode-for-yield",
+        "shear-vs-displacement",
+        "weigh-grasp-by-lift",
+    )

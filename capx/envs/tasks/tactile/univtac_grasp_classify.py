@@ -12,19 +12,43 @@ texture is rough or smooth, and gently place it on the matching pad:
 In the scene the prism is named "prism" and the pads "orange_pad" and
 "green_pad" - use those exact names with the pose and grasp helpers.
 
-Key rules:
-- Texture is read from the gel's marker-image anisotropy (get_tactile_data),
-  and its size depends on how hard the gel is pressed — so it is read at two
-  COMMANDED grip depths and the two are compared. Which channel, which two
-  depths, and the calibrated values to split on are in the tactile skills at
-  the end of this prompt.
-- Place the prism with the placement recipe in those same skills: the task is
-  scored on where it ends up, upright and on the right pad.
-- Final placement: within 2 cm horizontally and 1 cm vertically, upright
-  within 15°.
+Your fingertips are the instrument: texture is the gel's marker-image
+anisotropy, and its size tracks how hard the gel is pressed - so it is read as
+the change between two commanded grips, never as one reading. Which channel,
+which two grips, and the value to split them at are in the tactile skills at
+the end of this prompt.
+
+After classifying, carry the prism to its pad. The placement recipe - how to
+move a held object, where to stop, and whether to let go - is in those same
+skills. This task is scored on where the prism ends up: on the right pad,
+upright, and stop.
+
+Final placement: within 2 cm horizontally and 1 cm vertically, upright within 15
+degrees.
 
 Write ONLY executable Python code (no code fences). Import numpy if needed.
 """
+
+# The trace arm delivers the frozen original-21 library's routed set (the
+# snapshot kept at capx/tactile_skills/initial_libraries/original-21-3758efb in
+# the sibling study).  That set carries the split, so the standard prompt's
+# "the value to split them at is in the tactile skills" is true; it carries no
+# placement skill, so that promise is rewritten.  The unattended paragraph is
+# this harness's own requirement.
+PROMPT_TRACE = PROMPT.replace(
+    "The placement recipe - how to\n"
+    "move a held object, where to stop, and whether to let go - is in those same\n"
+    "skills.",
+    "How to move a held object, where to stop, and whether to let go\n"
+    "have to be worked out from your attempts.",
+).replace(
+    "Write ONLY executable Python code",
+    "The program runs unattended: nothing can be typed in, and input() is not\n"
+    "available. Decide from readings you can take yourself and from the attached\n"
+    "attempt.\n\n"
+    "Write ONLY executable Python code",
+)
+assert PROMPT_TRACE != PROMPT, "PROMPT_TRACE lost its anchor; update the marker"
 
 ORACLE_CODE = """
 import numpy as np
@@ -118,3 +142,31 @@ check_success()
 class UniVTACGraspClassifyCodeEnv(CodeExecutionEnvBase):
     prompt = PROMPT
     oracle_code = ORACLE_CODE
+
+
+class UniVTACGraspClassifyTraceCodeEnv(UniVTACGraspClassifyCodeEnv):
+    """The cross-seed trace experiment on grasp_classify.
+
+    The delivered set is the frozen original-21 library's route for this task
+    (six skills): the texture calibration with its 0.06 split
+    (``texture-slope-two-grips``), the depth scale and the two channel rules
+    (``shear-vs-displacement``, ``gel-shear-weight``), plus the two servo
+    caveats (``follow-is-signal``, ``position-mode-for-yield``).
+
+    What is left to learn is the procedure: where to grasp, how to place, and
+    how to trust the placement.  The old library has no ``place`` family, so
+    the prompt's placement promise is rewritten -- the placement recipe is not
+    in the skills.
+
+    Compact rendering is enough: each kept skill's summary is the rule.
+    """
+
+    prompt = PROMPT_TRACE
+    tactile_skills = (
+        "depth-grip-scale",
+        "follow-is-signal",
+        "gel-shear-weight",
+        "position-mode-for-yield",
+        "shear-vs-displacement",
+        "texture-slope-two-grips",
+    )

@@ -2,7 +2,7 @@
 id: A30
 name: strap-grasp-and-ramp
 family: act
-summary: Ask sample_grasp_pose for the strap's tab and close at 0.22 — measure the gain on the first two 2 mm rises; climb only upward, in steps of at most 2 mm, and three raises that change nothing mean re-grasp.
+summary: Ask sample_grasp_pose for the strap's tab and close_gripper(position=0.22) — measure the gain on the first two 2 mm rises; climb only upward, in steps of at most 2 mm, and three raises that change nothing mean re-grasp.
 task_types: []
 tasks: [tension_strap]
 channels: [shear]
@@ -56,6 +56,11 @@ re-approach in one call ([[one-call-approach]]), close at 0.22 again.
 
 ## Traps
 
+- **0.22 is an opening, not a depth.** `force_threshold=0.22` asks the gel
+  servo for 0.22 mm of deformation, which no compliant object can reach: on
+  2026-11-07 the close drove the fingers to a full close (qpos=0.0000, gel at
+  24.00 mm) and raised, ending a trial on its sixth line with the grasp pose
+  itself correct.
 - **A hand-built grasp pose is four to five millimetres off.** It does not
   matter while the close is a depth servo; with an opening close it decides
   what the pads land on.

@@ -2564,25 +2564,31 @@ def _sim_rotate_gripper(object_name: str, total_angle_rad: float,
 def _sim_get_grasp_pose(object_name: str, allow_ground_truth: bool = False) -> dict:
     """Return a grasp pose (position + quaternion WXYZ) for an object on the table.
 
-    ``allow_ground_truth`` marks a privileged caller (one whose object poses
-    already come from the simulator).  When it is set and the task declares a
-    rule in ``_GT_GRASP_RULES`` for this object, the pose is built from the
-    object's own pose plus the task's grasp rule and the EE-relative cache below
-    is bypassed — the only case where the compromise in the NOTE applies.
+    Two task hooks can answer without the cache below, and both are tried
+    first — the pose they build comes from the object, never from the hand:
 
-    On the FIRST call for an object — while the EE still sits at the valid
-    pre-grasp pose left by ``pre_move`` — we cache the object-relative offset
-    ``ee_pose - object_pose`` together with the grasp quaternion.  Subsequent
-    calls (a re-grasp after the object slipped out) return ``object_pose +
-    offset`` so the pose tracks the object wherever it now lies, instead of
-    returning the EE's current (possibly far-from-object) pose.
+    * ``get_live_grasp_pose(object_name)`` — for every caller.  The task
+      turns the object's own live pose into its grasp pose, so it is right
+      for every object and stays right after an earlier probe has shifted
+      one.  ``tactile_memory_match`` answers this way.
+    * ``_GT_GRASP_RULES`` + ``allow_ground_truth`` — for privileged callers
+      only.  The task names a constant height and an anchor; the rule is
+      applied to the object's pose.
 
-    NOTE: the cache is keyed by object name but seeded by the EE pose at the
+    Otherwise, on the FIRST call for an object — while the EE still sits at
+    the valid pre-grasp pose left by ``pre_move`` — we cache the
+    object-relative offset ``ee_pose - object_pose`` together with the grasp
+    quaternion.  Subsequent calls (a re-grasp after the object slipped out)
+    return ``object_pose + offset`` so the pose tracks the object wherever it
+    now lies, instead of returning the EE's current pose.
+
+    NOTE: that cache is keyed by object name but seeded by the EE pose at the
     first call — only the object that ``pre_move`` anchored (EE directly
     above it) is reliable.  For any other object the cached offset is
     ``EE_now - object`` and returns a pose at the EE's current location
     (e.g. above a previously filled slot), which is why the API docs tell
-    agents to construct such grasps from a measured offset instead.
+    agents to construct such grasps from a measured offset instead.  A task
+    that does not want that trap should expose ``get_live_grasp_pose``.
 
     Returns ``{"position": None, ...}`` when the object cannot be found.
     """
@@ -2649,6 +2655,34 @@ def _sim_get_grasp_pose(object_name: str, allow_ground_truth: bool = False) -> d
             return {
                 "position": np.asarray(ee_pose.p, dtype=np.float64).tolist(),
                 "quaternion_wxyz": np.asarray(ee_pose.q, dtype=np.float64).tolist(),
+            }
+
+    # A task that can rebuild its grasp from the object's own live pose, and
+    # from nothing else, answers here.  It has to: the cache below is seeded
+    # by ``ee_pose - object_pose`` at the first call, which is only valid for
+    # the object ``pre_move`` anchored.  For every other object it returns the
+    # hand's own location.  gpt-6-astra trial 26 (2026-11-07) asked for
+    # ``candidate_left`` at y=-0.347, was told y=+0.239, drove nowhere and
+    # closed on air six times across the two candidates.
+    live_grasp = getattr(_TASK, "get_live_grasp_pose", None)
+    if callable(live_grasp):
+        try:
+            built = live_grasp(object_name)
+        except Exception as exc:
+            logger.warning(
+                "Grasp pose for '%s': the task's live-pose rule failed (%r) "
+                "-- falling back to the EE-relative cache", object_name, exc,
+            )
+            built = None
+        if built is not None:
+            position, quaternion = built
+            logger.info(
+                "Grasp pose for '%s': built from its live pose at %s -> %s",
+                object_name, object_pos, position,
+            )
+            return {
+                "position": [float(v) for v in position],
+                "quaternion_wxyz": [float(v) for v in quaternion],
             }
 
     if object_name in _GRASP_OFFSET:
@@ -3145,6 +3179,12 @@ def health():
     return {
         "status": "ok",
         "task": _TASK_NAME,
+        # The seed the process was started on.  Force tasks serve exactly one
+        # seed per process, so an unattended chain that starts a server per
+        # trial has to be able to check it got the one it asked for.
+        "seed": int(getattr(getattr(_TASK, "cfg", None), "seed", -1))
+        if _TASK
+        else -1,
         "step": _TASK.step_count if _TASK else 0,
         "plan_success": _TASK.plan_success if _TASK else True,
     }
@@ -3585,9 +3625,48 @@ def _build_piano_task(task_config: dict, device: str, seed: int,
     for spec in cfg_overrides or ():
         _apply_cfg_override(cfg, spec)
 
+    # /health reports cfg.seed so a per-seed chain can wait for the server
+    # started on the same seed as the trial.  This standalone TaskCfg has no
+    # ``seed`` field -- ``piano_seed`` is the sequence draw -- so expose the
+    # server's seed under the name /health reads.  Without it, /health said -1
+    # and run_trace_chain.sh's wait loop never accepted the server.
+    cfg.seed = int(seed)
+
     logger.info("Piano sequence for seed %s: %s / %s",
                 seed, list(sequence.midi), list(sequence.dynamics))
     logger.info("GelSight Mini workspace: %s", workspace)
+
+    # The hand's USD normally comes from the Isaac Nucleus S3 URL.  On this
+    # host direct HTTP egress lands on the campus captive portal and the
+    # Omniverse resolver does not use the shell's HTTP proxy, so the fetch
+    # fails with "USD file not found" during task construction.  A local copy
+    # (the same two files, fetched once) takes the network out of startup.
+    hand_usd = os.environ.get("SHADOW_HAND_USD", "")
+    if hand_usd and Path(hand_usd).is_file():
+        import isaaclab_assets
+
+        isaaclab_assets.SHADOW_HAND_CFG.spawn.usd_path = str(Path(hand_usd))
+        logger.info("Shadow Hand USD (local): %s", hand_usd)
+    elif hand_usd:
+        logger.warning(
+            "SHADOW_HAND_USD=%s is not a file; falling back to the Nucleus URL",
+            hand_usd,
+        )
+
+    # The arm that carries the hand is a second remote asset tree (the Panda
+    # links, hand and materials).  Same network problem, same local copy.
+    arm_usd = os.environ.get("PANDA_USD", "")
+    if arm_usd and Path(arm_usd).is_file():
+        import isaaclab_assets
+
+        isaaclab_assets.FRANKA_PANDA_HIGH_PD_CFG.spawn.usd_path = str(Path(arm_usd))
+        logger.info("Franka Panda USD (local): %s", arm_usd)
+    elif arm_usd:
+        logger.warning(
+            "PANDA_USD=%s is not a file; falling back to the Nucleus URL",
+            arm_usd,
+        )
+
     task = task_module.Task(cfg, render_mode="rgb_array")
 
     from capx.serving.univtac_piano_adapter import PianoTaskAdapter

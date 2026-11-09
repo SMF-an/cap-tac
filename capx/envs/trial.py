@@ -27,6 +27,17 @@ import numpy as np
 from PIL import Image
 
 from capx.envs.tasks.base import CodeExecutionEnvBase
+from capx.envs.trace_chain import (
+    DEFAULT_MAX_CHARS,
+    TraceRecord,
+    filter_check_detail,
+    format_trace,
+    load_previous_trace,
+    strip_final_check,
+    trace_chain_dir,
+    write_injected_block,
+    write_trace,
+)
 from capx.llm.client import (
     ModelQueryArgs,
     is_vlm_model,
@@ -650,6 +661,192 @@ def _handle_multi_turn_step(
 
 
 # ---------------------------------------------------------------------------
+# Cross-seed trace chain
+# ---------------------------------------------------------------------------
+
+def _join_turn_outputs(
+    turns: list[dict[str, Any]],
+    key: str,
+) -> str:
+    """Join one output stream over the blocks that produced any text."""
+    parts = [
+        (turn.get("block_idx", idx), turn.get(key, ""))
+        for idx, turn in enumerate(turns)
+    ]
+    parts = [(idx, text) for idx, text in parts if text]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0][1]
+    return "\n".join(f"[block {idx}]\n{text}" for idx, text in parts)
+
+
+def _build_trace_record(
+    *,
+    trial: int,
+    final_code: str,
+    final_check: str | None,
+    turn_records: list[dict[str, Any]],
+    info_step: dict[str, Any],
+    reward: float,
+    task_completed: bool | None,
+    num_regenerations: int,
+    num_finishes: int,
+    num_code_blocks: int,
+    elapsed_s: float,
+    injected_from_seed: int | None,
+    meta: dict[str, Any],
+    complete: bool,
+    timed_out: bool,
+    usage: dict[str, int] | None,
+) -> TraceRecord:
+    """Turn the trial's current state into the record the next seed reads."""
+    usage = usage or {}
+    return TraceRecord(
+        seed=trial,
+        complete=complete,
+        timed_out=timed_out,
+        sandbox_rc=int(info_step.get("sandbox_rc", 1)),
+        reward=float(reward),
+        # Keep the record JSON-friendly and truthiness unambiguous: some envs
+        # answer with numpy bools or 1/0 rather than a Python bool.
+        task_completed=None if task_completed is None else bool(task_completed),
+        code=strip_final_check(final_code, final_check),
+        stdout=_join_turn_outputs(turn_records, "stdout"),
+        stderr=_join_turn_outputs(turn_records, "stderr"),
+        check_detail=filter_check_detail(info_step.get("failure_detail")),
+        num_code_blocks=num_code_blocks,
+        num_regenerations=num_regenerations,
+        num_finishes=num_finishes,
+        elapsed_s=elapsed_s,
+        injected_from_seed=injected_from_seed,
+        input_tokens=int(usage.get("input_tokens", 0)),
+        output_tokens=int(usage.get("output_tokens", 0)),
+        reasoning_tokens=int(usage.get("reasoning_tokens", 0)),
+        cached_tokens=int(usage.get("cached_tokens", 0)),
+        token_calls=int(usage.get("calls", 0)),
+        meta=meta,
+    )
+
+
+def _write_trace_record(
+    trace_ctx: dict[str, Any],
+    *,
+    trial: int,
+    final_code: str,
+    final_check: str | None,
+    info_step: dict[str, Any],
+    reward: float,
+    task_completed: bool | None,
+    num_regenerations: int,
+    num_finishes: int,
+    num_code_blocks: int,
+    complete: bool,
+    timed_out: bool,
+    usage: dict[str, int] | None = None,
+) -> TraceRecord:
+    """Build and write one record, partial or final."""
+    record = _build_trace_record(
+        trial=trial,
+        final_code=final_code,
+        final_check=final_check,
+        turn_records=trace_ctx.get("turn_records", []),
+        info_step=info_step,
+        reward=reward,
+        task_completed=task_completed,
+        num_regenerations=num_regenerations,
+        num_finishes=num_finishes,
+        num_code_blocks=num_code_blocks,
+        elapsed_s=time.time() - trace_ctx["start_time"],
+        injected_from_seed=trace_ctx.get("injected_from_seed"),
+        meta=trace_ctx.get("meta", {}),
+        complete=complete,
+        timed_out=timed_out,
+        usage=usage,
+    )
+    write_trace(trace_ctx["dir"], record)
+    return record
+
+
+def _inject_previous_trace(
+    obs: dict[str, Any],
+    config: dict[str, Any],
+    trial: int,
+) -> TraceRecord | None:
+    """Append the previous seed's trace to the initial prompt.
+
+    Called after the initial visual description, so the VDM never sees the
+    trace: it is asked what the current scene looks like, and the previous
+    episode is not part of that scene.
+    """
+    chain_dir = trace_chain_dir(config)
+    previous = load_previous_trace(chain_dir, trial)
+    if previous is None:
+        print(f"[trace] seed {trial}: no earlier record, cold start")
+        return None
+
+    block = format_trace(
+        previous,
+        max_chars=config.get("trace_max_chars", DEFAULT_MAX_CHARS),
+    )
+    content = obs["full_prompt"][-1]["content"]
+    if isinstance(content, str):
+        obs["full_prompt"][-1]["content"] = [{"type": "text", "text": content}]
+        content = obs["full_prompt"][-1]["content"]
+    content.append({"type": "text", "text": block})
+    write_injected_block(chain_dir, trial, block)
+    print(
+        f"[trace] seed {trial}: injected seed {previous.seed}'s trace "
+        f"({len(block)} chars)"
+    )
+    return previous
+
+
+def _write_timeout_trace(
+    partial: dict[str, Any],
+    trial: int,
+    config: dict[str, Any],
+    exc: BaseException,
+) -> None:
+    """Finalize the seed's record when the wall-clock alarm ends the trial.
+
+    The per-block write already left a partial record; this replaces it with
+    one that says the attempt timed out, so the next seed sees the failure
+    rather than a silently missing step in the chain.
+    """
+    trace_ctx = partial.get("trace_ctx")
+    if not trace_ctx:
+        return
+
+    info_step = dict(
+        partial.get("info_step")
+        or {"sandbox_rc": 1, "stdout": "", "stderr": ""}
+    )
+    if not info_step.get("stderr"):
+        info_step["stderr"] = str(exc)
+
+    code_blocks = partial.get("code_blocks", [])
+    record = _write_trace_record(
+        trace_ctx,
+        trial=trial,
+        final_code=_annotate_code_blocks(
+            code_blocks, partial.get("code_block_metadata", [])
+        ),
+        final_check=partial.get("final_check"),
+        info_step=info_step,
+        reward=partial.get("reward", 0.0),
+        task_completed=info_step.get("task_completed"),
+        num_regenerations=partial.get("num_regenerations", 0),
+        num_finishes=partial.get("num_finishes", 0),
+        num_code_blocks=partial.get("num_code_blocks", len(code_blocks)),
+        complete=True,
+        timed_out=True,
+        usage=token_usage(),
+    )
+    print(f"[trace] seed {trial}: wrote timeout record ({len(record.code)} code chars)")
+
+
+# ---------------------------------------------------------------------------
 # Core single-trial execution
 # ---------------------------------------------------------------------------
 
@@ -722,6 +919,11 @@ def _run_single_trial(
     # Per-turn frame tracking (for video differencing and per-turn video saving)
     turn_frame_ranges: list[tuple[int, int]] = []
 
+    # One entry per executed block: the record the next seed reads is built
+    # from these, and the list is shared with partial_artifacts so a timeout
+    # can still write what ran.
+    turn_records: list[dict[str, Any]] = []
+
     # Wrist camera base64 history for image-based multiview differencing
     wrist_base64_history: list[str] | None = [] if use_wrist else None
 
@@ -757,6 +959,34 @@ def _run_single_trial(
                 f"{base64.b64encode(buf.getvalue()).decode('utf-8')}"
             )
 
+    # --- 2b. Carry the previous seed's trace into this prompt ---
+    # After the initial visual description on purpose: the VDM must describe
+    # the current scene, not read the previous episode into it.
+    trace_ctx: dict[str, Any] | None = None
+    if config.get("trace_mode", "off") != "off":
+        trace_ctx = {
+            "dir": trace_chain_dir(config),
+            "meta": {
+                "model": getattr(args, "model", None),
+                "config_path": getattr(args, "config_path", None),
+                "trace_mode": config.get("trace_mode"),
+                "trace_max_chars": config.get("trace_max_chars"),
+                "deliver_tactile_skills": config.get("deliver_tactile_skills"),
+            },
+            "injected_from_seed": None,
+            "turn_records": turn_records,
+            "start_time": trial_start_time,
+        }
+        previous = _inject_previous_trace(obs, config, trial)
+        if previous is not None:
+            trace_ctx["injected_from_seed"] = previous.seed
+        if partial_artifacts is not None:
+            # Register the context before the model call: a timeout there has
+            # no code to show, but the next seed should still learn that this
+            # attempt happened and produced nothing.
+            partial_artifacts["trace_ctx"] = trace_ctx
+            partial_artifacts["turn_records"] = turn_records
+
     # --- 3. Initial code generation ---
     if config["use_oracle_code"]:
         raw_code = env.oracle_code
@@ -784,6 +1014,8 @@ def _run_single_trial(
             "num_code_blocks": 0,
             "ensemble_data": ensemble_data,
             "multiturn_ensemble_data": multiturn_ensemble_data,
+            "trace_ctx": trace_ctx,
+            "turn_records": turn_records,
         })
 
     # Parse initial code into blocks
@@ -828,6 +1060,23 @@ def _run_single_trial(
         final_check = env.final_check_name()
     if final_check and config["use_oracle_code"]:
         final_check = None
+    # The appended call's own stdout is a leak in a trace chain: on failure
+    # check_success() prints the ground-truth texture and expected pad, and the
+    # trace would carry that to the next seed.  The call is a logging
+    # convenience -- env.step already calls /check_success for the verdict --
+    # so traced runs drop it instead of trying to scrub its output.
+    if final_check and config.get("trace_mode", "off") != "off":
+        print(
+            f"[trace] seed {trial}: not appending {final_check}() "
+            "(its output carries ground truth)"
+        )
+        final_check = None
+    if partial_artifacts is not None:
+        # The timeout path needs the name to strip the appended call from the
+        # code it records; without it the hidden check would leak into the
+        # next seed's prompt.
+        partial_artifacts["final_check"] = final_check
+
     while code_block_idx < len(code_blocks) and code_block_idx <= limit:
         code = code_blocks[code_block_idx]
         # Append the final-check call to the last block.  The function is
@@ -848,6 +1097,13 @@ def _run_single_trial(
         # Record frame index after step
         frame_end = env.get_video_frame_count() if recording_frames else 0
         turn_frame_ranges.append((frame_start, frame_end))
+
+        if trace_ctx is not None:
+            trace_ctx["turn_records"].append({
+                "block_idx": len(trace_ctx["turn_records"]),
+                "stdout": info_step.get("stdout", ""),
+                "stderr": info_step.get("stderr", ""),
+            })
 
         if partial_artifacts is not None:
             partial_artifacts.update({
@@ -933,6 +1189,24 @@ def _run_single_trial(
             all_responses, ["-" * 100, "Generated program:", final_code],
             visual_feedback_imgs,
         )
+
+        # Intermediate record: a hard kill between blocks still leaves the next
+        # seed something to read.  The final write replaces it.
+        if trace_ctx is not None:
+            _write_trace_record(
+                trace_ctx,
+                trial=trial,
+                final_code=final_code,
+                final_check=final_check,
+                info_step=info_step,
+                reward=reward,
+                task_completed=info_step.get("task_completed"),
+                num_regenerations=num_regenerations,
+                num_finishes=num_finishes,
+                num_code_blocks=len(code_blocks),
+                complete=False,
+                timed_out=False,
+            )
 
         # Only save intermediate video if NOT doing per-turn saving
         # (per-turn saving is deferred to after the loop to avoid clearing the buffer)
@@ -1021,6 +1295,23 @@ def _run_single_trial(
         f"output={usage['output_tokens']} reasoning={usage['reasoning_tokens']} "
         f"cached={usage['cached_tokens']} calls={usage['calls']}"
     )
+
+    if trace_ctx is not None:
+        _write_trace_record(
+            trace_ctx,
+            trial=trial,
+            final_code=final_code,
+            final_check=final_check,
+            info_step=info_step,
+            reward=reward,
+            task_completed=info_step.get("task_completed"),
+            num_regenerations=num_regenerations,
+            num_finishes=num_finishes,
+            num_code_blocks=num_code_blocks,
+            complete=True,
+            timed_out=False,
+            usage=usage,
+        )
 
     # Keep the per-trial wall-clock in the trial's own summary: the console
     # line is the only other place it exists, and that log lives outside the

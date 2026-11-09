@@ -126,8 +126,8 @@ output_dir: ./outputs/univtac_blind_pick_balls
 # seed, so a run here says nothing about any other seed, and the server serving
 # it cannot reset to one.  Move both numbers together AND restart the server on
 # the same seed for each round.
-trials: 8
-resume_idx: 8
+trials: 10
+resume_idx: 9
 num_workers: 1  # Isaac Sim is not parallel-safe
 
 use_visual_feedback: true

@@ -7,9 +7,8 @@ on both fingertips. The API is described below.
 Task: tactile memory matching.  Three identical orange cans (lying flat on 
 the table) sit in a line: one REFERENCE can at the back, two CANDIDATE cans 
 in front of it (candidate_left on the left, candidate_right on the right).  
-A green MATCH SLOT lies beside the row. Public pose names (get_object_pose; 
-returns position, quaternion_wxyz, bbox_extent): reference_object, 
-candidate_left, candidate_right and match_slot.
+A green MATCH SLOT lies beside the row. The four are addressed by name:
+reference_object, candidate_left, candidate_right and match_slot.
 
 The cans look exactly the same but differ physically in three independent
 ways: 2 surface textures x 2 weights x 2 hardnesses (one rigid, one
@@ -23,19 +22,6 @@ three); the other differs in at least one of them.  Your job:
   3. Place on the MATCH SLOT the candidate whose feel is closest to the
      reference.  Vision cannot tell them apart — decide ONLY from tactile
      data.
-
-Key rules:
-- Every call can fail, time out, or be rejected.  Wrap each in try/except and
-  treat a failure as "this attempt missed", never as the end of your program:
-  a crashed trial scores 0 exactly like a wrong answer.
-- Budget the episode, not the attempt: the whole run has to fit in roughly
-  250 API calls, at most 3 grips per can plus one re-grasp.  Every call costs
-  about the same ~10 s whether it moves 2 mm or 50 mm, so the count is what
-  costs, not the distance.  Once a can's budget is spent, decide with the
-  readings you have — two cans fully read beats three cans half-read.
-- Obtain valid protocol readings for the reference and both candidates before
-  deciding.  The skills below say what makes a reading valid, what a missed
-  approach costs, and which candidate the readings do and do not identify.
 
 Write ONLY executable Python code (no code fences). Import numpy if needed.
 """
@@ -542,6 +528,63 @@ print(f"Success: {check_success()}")
 """
 
 
+# The trace arm keeps the standard prompt -- it never named a threshold -- and
+# only adds the one rule the grasp_classify chain learned the hard way: the
+# program runs unattended.  It also asks for the comparison to be printed,
+# because memory_match's check_success returns a bare bool (no detail dict), so
+# the previous attempt's stdout is the only place a later seed can read what
+# was compared.
+# The trace arm delivers the frozen original-21 library's routed set for this
+# task.  That set includes the one-grasp protocol, so the standard prompt's
+# reference to it is true; the only addition is this harness's unattended rule.
+PROMPT_TRACE = PROMPT.replace(
+    "Write ONLY executable Python code",
+    "The program runs unattended: nothing can be typed in, and input() is not\n"
+    "available. Print the readings and the comparison you act on, so a later\n"
+    "attempt can see them.\n\n"
+    "Write ONLY executable Python code",
+)
+assert PROMPT_TRACE != PROMPT, "PROMPT_TRACE lost its anchor; update the marker"
+
+
 class UniVTACTactileMemoryMatchCodeEnv(CodeExecutionEnvBase):
     prompt = PROMPT
     oracle_code = ORACLE_CODE
+
+
+class UniVTACTactileMemoryMatchTraceCodeEnv(UniVTACTactileMemoryMatchCodeEnv):
+    """The cross-seed trace experiment on tactile_memory_match.
+
+    The task's own difficulty is the protocol, not one number: the reference
+    and both candidates have to be probed, and the match is decided by
+    comparing three properties of three cans.
+
+    The delivered set is the frozen original-21 library's route for this task
+    minus one skill (six of its seven): the one-grasp protocol with its two
+    commanded closes (``memory-match-one-grasp``), the texture split
+    (``can-texture-difference``, 0.02), the depth scale, the load channel
+    (``follow-is-signal``), the channel rule and the servo caveat.
+
+    The one deviation is ``gel-shear-weight``.  The old library routes it to
+    every ``classify`` task, but this task's weight axis is read from the
+    can's own z -- ``follow`` (how far it rode the lift) and ``sag_mm`` (its
+    stick-slip spread while suspended).  The shear difference is not a feature
+    of this task's scorer at all (``DIMENSION_AXES``), so delivering the shear
+    rule would teach a read that does not decide anything here, and it
+    contradicts ``follow-is-signal`` in the same block.
+
+    What is left to learn is the procedure that surrounds the measurement:
+    how to reach each can, how to carry it, where to set it down, and how to
+    know the placement took.  The old library has no ``place`` family and no
+    approach rules.
+    """
+
+    prompt = PROMPT_TRACE
+    tactile_skills = (
+        "can-texture-difference",
+        "depth-grip-scale",
+        "follow-is-signal",
+        "memory-match-one-grasp",
+        "position-mode-for-yield",
+        "shear-vs-displacement",
+    )

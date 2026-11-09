@@ -27,6 +27,24 @@ export VITAFORGE_ROOT="${VITAFORGE_ROOT:-${PWD}/../ViTaForge}"
 # UniVTAC's own scripts/collect_data.py uses (--gpu).
 export CUDA_VISIBLE_DEVICES="$GPU"
 
+# The piano's Shadow Hand USD normally comes from the Isaac Nucleus S3 URL.
+# Direct egress on this host lands on the campus captive portal and the
+# Omniverse asset resolver ignores the shell's HTTP proxy, so piano servers
+# died at startup with "USD file not found".  Point the task at a local copy
+# of the same two files when it exists; other tasks ignore the variable.
+export SHADOW_HAND_USD="${SHADOW_HAND_USD:-${HOME}/assets/shadow_hand/shadow_hand_instanceable.usd}"
+# The carrying Panda arm is a second remote tree (links, hand, materials);
+# same fix.
+export PANDA_USD="${PANDA_USD:-${HOME}/assets/franka_emika/panda_instanceable.usd}"
+
+# Isaac Sim's omni.services HTTP transport takes a fixed port (8083) from its
+# carb settings, and when it loses the bind race it calls kit_exit and kills
+# the whole server process.  On 2026-11-09 two ViTaForge servers started at
+# once and hardness_classify died with "address already in use" on 8083.  Give
+# each server its own port in the 9000 range; nothing in this harness talks to
+# that service.
+KIT_ARGS="--/exts/omni.services.transport.server.http/port=$((PORT + 1000))"
+
 # Supervisor loop (shared with launch_sam3_server.sh, see _supervise.sh): a
 # cuRobo hang — which the server's freeze watchdog terminates with SIGKILL
 # (exit 137) — auto-respawns the server; Ctrl+C (graceful exit 0) breaks it.
@@ -40,4 +58,5 @@ supervise "UniVTAC server" \
     --headless \
     --device "cuda:0" \
     --seed "$SEED" \
+    --kit_args="$KIT_ARGS" \
     "${@:5}"

@@ -2,8 +2,9 @@
 id: R5
 name: regrasp-after-slip
 family: protocol
-summary: Once it has slipped, or the gate keeps rejecting, re-grasp — carrying on spends the rest of the motion slipping.
+summary: Once a grip has failed — slipped, met nothing, or a gate keeps rejecting — re-grasp and re-query the pose; the same approach returns the same reading.
 task_types: [insert, manipulate, screw, wipe]
+tasks: [tactile_memory_match]
 channels: [shear, coherence]
 objects: any held object
 evidence: A close that never gripped carries nothing — every commanded twist is spent sliding the pads over the surface, nothing turns, and the squeeze climbs until the motion aborts on its force guard. The same is true of a grasp the tracker cannot read — on 2026-10-09 an evening run's left pad read 0.04 to 0.22 through three probes and the run had no lead at the end of them, and on 2026-10-10 a run's left pad read 0.26 to 0.32 through a fresh grasp and every block it drove had its reading rejected. Both kept the grasp.

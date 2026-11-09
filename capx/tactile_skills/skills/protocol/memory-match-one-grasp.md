@@ -2,7 +2,7 @@
 id: R11
 name: memory-match-one-grasp
 family: protocol
-summary: One progressive squeeze per can — 0.50 touches nothing (both pads 34.0 mm), 0.25 is the contact close, both adaptive off; then lift 2 cm and a ±2 mm sag pair.
+summary: One progressive squeeze per can — 0.50 touches nothing (both pads 34.0 mm), 0.25 is the contact close and must leave the far plane; hardness and texture are the difference between those two closes, never a third; then lift 2 cm and a ±2 mm sag pair.
 task_types: []
 tasks: [tactile_memory_match]
 channels: [depth, anisotropy, coincidence]
@@ -37,6 +37,12 @@ One squeeze supplies every feature: loose minus firm depth for hardness
   reading to accept. Low follow-through does not invalidate the reading,
   symmetry is not required, and not every property channel has to vote
   ([[follow-is-signal]]).
+- **Do not add a third close.** Both features come off the 0.50 and 0.25 pair;
+  closing further afterwards collapses the hardness contrast instead of
+  sharpening it. On 2026-11-07 the three cans read 12.3 / 12.3 / 7.5 mm of
+  depth gain at the 0.25 close — the twin pair identical to the decimal — but
+  only 2.3 / 2.9 / 2.4 across a full close, and the run that took the full
+  close as its pair carried the compliant can to the pad.
 - **Do not carry the block's numbers here.** `position=0.10` and `0.06` are both
   already past a 4 cm can, so both closes bottom out and the difference
   collapses to ~0 for either hardness — a blind reading that reads like a

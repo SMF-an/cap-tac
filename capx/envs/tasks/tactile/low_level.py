@@ -35,6 +35,10 @@ class UniVTACStubEnv(BaseEnv):
         )
         self._obs: dict[str, Any] = {}
         self._last_success: bool = False
+        # Last /check_success detail.  The task-side diagnostic is kept for
+        # the trace chain; the trace writer filters out its ground-truth
+        # fields (see capx.envs.trace_chain.filter_failure_detail).
+        self._last_detail: dict[str, Any] | None = None
         self._harness_announced: bool = False
 
         # Minimal observation/action spaces
@@ -76,6 +80,7 @@ class UniVTACStubEnv(BaseEnv):
         )
         r.raise_for_status()
         self._last_success = False
+        self._last_detail = None
         return {
             "task_prompt": f"UniVTAC {self.task_name}",
         }, {}
@@ -113,6 +118,7 @@ class UniVTACStubEnv(BaseEnv):
             r.raise_for_status()
             data = r.json()
             self._last_success = data.get("completed", False)
+            self._last_detail = data.get("detail")
             return 1.0 if self._last_success else 0.0
         except Exception:
             return 0.0
@@ -120,6 +126,16 @@ class UniVTACStubEnv(BaseEnv):
     def task_completed(self) -> bool:
         """Return whether the last server check indicated success."""
         return self._last_success
+
+    def failure_detail(self) -> dict[str, Any] | None:
+        """The task's own diagnostics from the last /check_success reply.
+
+        The dict is whatever the served task put in ``detail``; grasp_classify
+        includes geometric reasons, the truth texture and the expected pad.
+        Callers that deliver it to a model must filter it -- the trace chain
+        keeps only the non-oracle fields.
+        """
+        return self._last_detail
 
     def physics_step(self) -> int | None:
         """Physics ticks since the episode reset, from the server's clock.

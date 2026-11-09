@@ -24,6 +24,7 @@ from capx.envs.trial import (
     _annotate_code_blocks,
     _build_log_lines,
     _run_single_trial,
+    _write_timeout_trace,
 )
 from capx.utils.launch_utils import (
     TrialSummary,
@@ -140,6 +141,16 @@ def _run_headless_trials(
         raise ValueError("record_video requires --output-dir to save generated videos")
 
     _setup_output_dir(args, config)
+
+    # A trace chain is a sequence: seed N reads seed N-1's record, so the
+    # trials must run one at a time in ascending order and must leave their
+    # records somewhere.  Parallel workers would also each build their own
+    # env, but nothing guarantees they finish in seed order.
+    if config.get("trace_mode", "off") != "off":
+        if not config.get("output_dir"):
+            raise ValueError("trace_mode requires --output-dir / output_dir")
+        if config.get("num_workers", 1) > 1:
+            raise ValueError("trace_mode requires --num-workers 1 for seed order")
 
     # Determine which trials to run (supports resume)
     trial_ids = list(range(1, config["total_trials"] + 1))
@@ -374,6 +385,10 @@ def _build_timeout_summary(
         info_step["stderr"] = str(exc)
     else:
         info_step["stderr"] += f"\n\nTimeout Error: {exc}"
+
+    # Finalize this seed's chain record before the partial artifacts are
+    # written: the next seed must see a timed-out attempt, not a gap.
+    _write_timeout_trace(pa, trial, config, exc)
 
     _save(
         config=config,

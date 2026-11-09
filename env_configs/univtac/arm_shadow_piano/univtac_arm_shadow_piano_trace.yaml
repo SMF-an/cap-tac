@@ -1,0 +1,64 @@
+# ViTaForge: arm_shadow_piano, cross-seed trace experiment.
+#
+# Same task and API as univtac_arm_shadow_piano.yaml; the class changes what is
+# delivered:
+#   * the frozen original-21 library's one skill for this task
+#     (piano-gel-force-band): the force target for each dynamic and what the
+#     estimate does at the top of its range.  The library's taxonomy routes the
+#     task to the `force` family for the config test, but its own comment says
+#     the env class names exactly that one skill -- none of the family's grasp /
+#     carry / load rules describes a single-finger key press;
+#   * the trace arm's unattended rule and its request to print each press's
+#     estimate (the task's check detail is `_info`, whose fields are mostly
+#     outside the trace allowlist).
+#
+# server_lifecycle: per_seed is REQUIRED: the note sequence is drawn from the
+# server's --seed before the task is built (capx/serving/piano_spec.py), so a
+# second seed needs a second server process.  run_trace_chain.sh reads this key
+# and owns the server for the whole chain.
+#
+# Run:
+#   bash scripts/run_trace_chain.sh arm_shadow_piano 1 30 <model> 8120 12000 \
+#       env_configs/univtac/arm_shadow_piano/univtac_arm_shadow_piano_trace.yaml
+#
+# A seed costs about 10-15 minutes (the standard seed-1 trial measured 666 s)
+# plus a per-seed server start, so thirty seeds is roughly 6-10 hours.
+#
+# The alarm sits above the task's own clock (180 s of simulated time at 30 Hz)
+# and above the measured wall time, so it only bounds a run that has already
+# spent its episode or is stuck in a model retry loop.
+exec_alarm_seconds: 7200
+
+env:
+  _target_: capx.envs.tasks.tactile.univtac_arm_shadow_piano.UniVTACArmShadowPianoTraceCodeEnv
+  cfg:
+    _target_: capx.envs.tasks.base.CodeExecEnvConfig
+    low_level: env_configs/univtac/arm_shadow_piano/low_level_arm_shadow_piano.yaml
+    privileged: false
+    apis:
+      - UniVTACPianoApi
+
+api_servers:
+  - _target_: capx.serving.launch_univtac_server.main
+    task: arm_shadow_piano
+    port: 8120
+    host: 127.0.0.1
+
+server_lifecycle: per_seed
+
+record_video: true
+# Its own directory: the standard run of this task lives in
+# ./outputs/univtac_arm_shadow_piano and must not be overwritten.
+output_dir: ./outputs/univtac_arm_shadow_piano_trace
+
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
+
+# The driver passes --total-trials <seed> --resume-idx <seed>, which overrides
+# these; one trial at seed 1 is what a hand-launched run gets, and it only
+# matches the server when the server was started on seed 1.
+trials: 1
+resume_idx: 1
+num_workers: 1  # Isaac Sim is not parallel-safe

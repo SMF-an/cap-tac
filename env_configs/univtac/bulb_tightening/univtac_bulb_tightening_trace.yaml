@@ -1,0 +1,65 @@
+# UniVTAC: bulb_tightening, cross-seed trace experiment.
+#
+# Same task and API as univtac_bulb_tightening.yaml; the class changes what is
+# delivered:
+#   * the frozen original-21 library's route (6 skills): the direction legs,
+#     the shear-to-mm conversion, the lead formula, the seat rule, the depth
+#     scale and the channel rule;
+#   * no grasp, feed, wrist-reset or recovery rule -- the old library has
+#     none.  Of the prompt's promises, only the wrist-reset one is rewritten,
+#     because the old library has no wrist-limit-segmentation.
+#
+# server_lifecycle: per_seed is REQUIRED: the thread lead is drawn from the
+# seed before UIPC initialises, and bulb_tightening raises on any other
+# combination ("Create one force-task process per seed ...").  run_trace_chain.sh
+# reads this key and owns the server for the whole chain: per seed it stops
+# whatever is on the port, starts one on that seed, waits for /health to report
+# the right task and seed, runs the trial, and stops it again.
+#
+# Run:
+#   bash scripts/run_trace_chain.sh bulb_tightening 1 10 <model> 8120 12000
+#
+# A seed costs 52-108 minutes of episode on the oracle's own path (the thread
+# lead is drawn per seed: seed 1 is ~108 min, seed 9 ~52), plus a server start
+# per seed.  Ten seeds is therefore 10-20 hours; thirty would be 45-110 hours.
+# Start with a short range.
+#
+# The alarm is the standard config's 10500 s.  Its floor is the ORACLE's need
+# on a loaded machine (~9850 s measured), and that floor does not move with
+# skill wording, so lowering it turns runs that would have finished into
+# failures.
+
+env:
+  _target_: capx.envs.tasks.tactile.univtac_bulb_tightening.UniVTACBulbTighteningTraceCodeEnv
+  cfg:
+    _target_: capx.envs.tasks.base.CodeExecEnvConfig
+    low_level: env_configs/univtac/bulb_tightening/low_level_bulb_tightening.yaml
+    privileged: false
+    apis:
+      - UniVTACTactileApi
+
+api_servers:
+  - _target_: capx.serving.launch_univtac_server.main
+    task: bulb_tightening
+    port: 8120
+    host: 127.0.0.1
+
+server_lifecycle: per_seed
+
+record_video: true
+# Its own directory: every standard run of this task lives in
+# ./outputs/univtac_bulb_tightening and must not be overwritten.
+output_dir: ./outputs/univtac_bulb_tightening_trace
+
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
+
+exec_alarm_seconds: 10500
+
+# The driver passes --total-trials <seed> --resume-idx <seed>, which overrides
+# these; keep trials >= resume_idx so a hand-launched run still does something.
+trials: 5
+resume_idx: 1
+num_workers: 1  # Isaac Sim is not parallel-safe

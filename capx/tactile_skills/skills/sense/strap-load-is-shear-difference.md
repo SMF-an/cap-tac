@@ -2,7 +2,7 @@
 id: A26
 name: strap-load-is-shear-difference
 family: sense
-summary: From the position=0.22 close, raising the hand reads 0.93 N per px of the two pads' shear difference, minus a 2.3 mm take-up times the gain you measure; near the target step 0.5 mm, not 2.
+summary: Close at close_gripper(position=0.22), then raising the hand reads 0.93 N per px of the two pads' shear difference from that close, minus a take-up of 2.3 mm times the gain you measure; near the target step 0.5 mm, not 2.
 task_types: [force]
 channels: [shear]
 objects: the elastic strap, gripped by the tab at its top

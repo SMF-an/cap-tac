@@ -628,6 +628,57 @@ say("blind_pick_balls v1 finished; the harness scores it")
 """
 
 
+# The trace arm keeps the standard prompt -- it names no threshold -- and adds
+# the one rule the grasp_classify chain learned the hard way: the program runs
+# unattended.  It also asks for the probe readings to be printed, because this
+# task's check detail carries only a failure name and a step count, so the
+# previous attempt's stdout is the only place a later seed can see what was
+# measured.
+PROMPT_TRACE = PROMPT.replace(
+    "Write ONLY executable Python code",
+    "The program runs unattended: nothing can be typed in, and input() is not\n"
+    "available. Print the readings you act on -- the close you command, the\n"
+    "relief and depth you read, and what you concluded from them -- so a later\n"
+    "attempt can see them.\n\n"
+    "Write ONLY executable Python code",
+)
+assert PROMPT_TRACE != PROMPT, "PROMPT_TRACE lost its anchor; update the marker"
+
+
 class UniVTACBlindPickBallsCodeEnv(CodeExecutionEnvBase):
     prompt = PROMPT
     oracle_code = ORACLE_CODE
+
+
+class UniVTACBlindPickBallsTraceCodeEnv(UniVTACBlindPickBallsCodeEnv):
+    """The cross-seed trace experiment on blind_pick_balls.
+
+    The episode has to settle which of twelve identical-looking balls is the
+    textured one, with no camera into the box and no pose query for the balls.
+    What transfers between seeds is therefore a search-and-measure procedure,
+    not a value: each seed re-draws the twelve materials from ``cfg.seed`` and
+    re-samples which cells are occupied, so a program that carries a cell
+    address or a material from the previous attempt is wrong by construction.
+
+    The delivered set is the frozen original-21 library's route for this task
+    (four skills): the depth scale, the channel rule, the material reading
+    with its 0.06 relief bar (``texture-in-relief``) and what fully open pads
+    read (``wide-pads-see-nothing``).
+
+    What is left to learn is the search and the delivery: how to sweep the
+    rows, how to leave a met ball where it is, how to lift and carry, and
+    where to release.  The old library has no search, transport or placement
+    family.
+
+    The task draws its twelve materials in ``Task.__init__`` from ``cfg.seed``
+    and never redraws them, so a second seed needs a second server process;
+    its config sets ``server_lifecycle: per_seed``.
+    """
+
+    prompt = PROMPT_TRACE
+    tactile_skills = (
+        "depth-grip-scale",
+        "shear-vs-displacement",
+        "texture-in-relief",
+        "wide-pads-see-nothing",
+    )

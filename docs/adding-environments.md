@@ -65,9 +65,10 @@ class MyTaskCodeEnv(CodeExecutionEnvBase):
     You are controlling a robot with the API described below.
     Goal: [describe the task clearly]
 
-    Key rules:
-    - [important constraints the model should follow]
-    - [coordinate frame conventions, units, etc.]
+    [One paragraph of principle: what carries the answer, and why the obvious
+    reading does not. Task know-how does not go here - channels, grips,
+    thresholds and placement recipes belong in the tactile skill library
+    (capx/tactile_skills/), which is rendered onto the end of this prompt.]
 
     Write ONLY executable Python code. No code fences.
     """

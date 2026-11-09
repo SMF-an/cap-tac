@@ -1,5 +1,6 @@
 import contextlib
 import io
+import re
 import sys
 import traceback
 from collections.abc import Callable
@@ -33,6 +34,19 @@ class Tee(io.TextIOBase):
             st.flush()
 
 
+_SKILL_LINK = re.compile(r"\[\[([^\]]+)\]\]")
+
+
+def _strip_skill_links(text: str) -> str:
+    """Drop the library's ``[[name]]`` cross-reference markers.
+
+    They are bookkeeping for whoever maintains the library: a prompt that
+    carries only a subset cannot resolve most of them, and a verbose block
+    would otherwise read as if those skills had been delivered.
+    """
+    return _SKILL_LINK.sub(r"\1", text)
+
+
 @dataclass
 class CodeExecEnvConfig:
     """Configuration for a code-execution environment.
@@ -59,6 +73,29 @@ class CodeExecEnvConfig:
     privileged: bool = False
     enable_render: bool = True
     viser_debug: bool = False
+    # Global switch for the tactile skill block appended to the prompt.  False
+    # withholds every skill, including ones a task names explicitly, so an
+    # experiment can strip the recipes without deleting the library (which
+    # would break routing, the taxonomy and every other task).
+    deliver_tactile_skills: bool = True
+
+
+def _unattended_input(prompt: str = "") -> str:
+    """Refuse ``input()`` inside generated code.
+
+    A trial is headless: stdin is whatever launched the run, so an ``input()``
+    call blocks the whole chain until someone types -- observed on 2026-11-08,
+    when gpt-6-astra, asked to calibrate a threshold from its own attempts,
+    wrote ``json.loads(input('Enter measured calibration slopes...'))`` and
+    parked seed 1 of a 30-seed run.  Raising turns the hang into a line the
+    model can read back (stderr travels in the trace) and fails the block fast.
+    """
+    raise RuntimeError(
+        "input() is not available: this program runs unattended and cannot "
+        "read from a terminal. Decide from the measurements and observations "
+        "the program can take itself."
+        + (f" Blocked prompt was: {prompt!r}" if prompt else "")
+    )
 
 
 class SimpleExecutor:
@@ -80,6 +117,8 @@ class SimpleExecutor:
             "APIS": self._apis,
             "INPUTS": inputs or {},
             "RESULT": None,
+            # Shadow the builtin so a generated input() cannot park the run.
+            "input": _unattended_input,
         }
         try:
             exec(code, g, g)
@@ -232,6 +271,13 @@ class CodeExecutionEnvBase(Env):
         """
         from capx.tactile_skills import default_library
 
+        # The switch wins over both routing paths below: a task that names
+        # skills by hand was still making a choice inside a run that has asked
+        # for none, and withholding only the routed ones would leave the block
+        # half present.
+        if not getattr(getattr(self, "cfg", None), "deliver_tactile_skills", True):
+            return ""
+
         verbose = bool(getattr(self, "tactile_skills_verbose", False))
         wanted = getattr(self, "tactile_skills", True)
         if wanted is not True:
@@ -240,13 +286,14 @@ class CodeExecutionEnvBase(Env):
             library = default_library()
             skills = [library.get(name) for name in wanted]
             body = "\n".join(s.render(compact=not verbose) for s in skills)
+            body = _strip_skill_links(body)
             return f"TACTILE SKILLS (named by {type(self).__name__}):\n{body}".strip()
 
         library = default_library()
         task = self._task_name()
         if library.task_type_of(task) is None or not self._reads_the_gel():
             return ""
-        return library.render_for_task(task, compact=not verbose)
+        return _strip_skill_links(library.render_for_task(task, compact=not verbose))
 
     def _get_complete_prompt(self) -> str:
         """
@@ -311,6 +358,8 @@ class CodeExecutionEnvBase(Env):
             "INPUTS": {},
             # Users can set and reuse RESULT across steps if desired
             "RESULT": None,
+            # Shadow the builtin so a generated input() cannot park the run.
+            "input": _unattended_input,
         }
         # Bind helper functions from APIs into the global namespace for convenience
         for api in self._apis.values():
@@ -391,6 +440,12 @@ class CodeExecutionEnvBase(Env):
             task_completed = self.low_level_env.task_completed()
         else:
             task_completed = None
+        # Optional task-side diagnostics from the check just performed.  The
+        # trace chain reads it to say why an attempt failed; envs without the
+        # hook simply report None.
+        failure_detail = None
+        if hasattr(self.low_level_env, "failure_detail"):
+            failure_detail = self.low_level_env.failure_detail()
         terminated = reward == 1.0
 
         truncated = getattr(self.low_level_env, "_sim_step_count", 0) >= getattr(
@@ -408,6 +463,7 @@ class CodeExecutionEnvBase(Env):
             "stderr": exec_result["stderr"],
             "task_prompt": self._task_prompt,
             "task_completed": task_completed,
+            "failure_detail": failure_detail,
         }
         return obs, reward, bool(terminated), bool(truncated), info
 

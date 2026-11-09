@@ -2,8 +2,9 @@
 id: R6
 name: cruise-height
 family: protocol
-summary: Travel at a cruise height and descend only at the target.
+summary: An open gripper swept near the table knocks the cans out of place — travel at z≈0.28 and descend only over the destination.
 task_types: [insert, manipulate, wipe]
+tasks: [tactile_memory_match]
 channels: []
 objects: any
 evidence: A sideways move while the object still rests on the surface topples it instead of moving it, which is why lifting clear is the first step of every transport.

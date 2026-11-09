@@ -769,9 +769,62 @@ else:
 """
 
 
+# The trace arm delivers the frozen original-21 library's routed set for this
+# task.  That set carries the direction, the lead and the seat, so the
+# standard prompt's promises about them are true; it carries no wrist-reset
+# recipe, so that one promise is rewritten.  The unattended paragraph is this
+# harness's requirement.
+PROMPT_TRACE = PROMPT.replace(
+    "the skills below give the reset sequence and say\nwhen to stop re-setting.",
+    "how to re-set it, and when to stop, are yours to\nwork out in this episode.",
+).replace(
+    "Write ONLY executable Python code",
+    "The program runs unattended: nothing can be typed in, and input() is not\n"
+    "available. Print the slide, lead and seat readings you act on, so a later\n"
+    "attempt can see what this one measured.\n\n"
+    "Write ONLY executable Python code",
+)
+assert PROMPT_TRACE != PROMPT, "PROMPT_TRACE lost its anchor; update the marker"
+
+
 class UniVTACBulbTighteningCodeEnv(CodeExecutionEnvBase):
     prompt = PROMPT
     oracle_code = ORACLE_CODE
+
+
+class UniVTACBulbTighteningTraceCodeEnv(UniVTACBulbTighteningCodeEnv):
+    """The cross-seed trace experiment on bulb_tightening.
+
+    This is an insertion, not a classification: what transfers between seeds is
+    a procedure, and the one value the episode must produce -- the thread lead
+    -- is drawn per seed (``default_rng(seed + 71823)``), so a program that
+    carries a lead from the previous attempt is wrong by construction on the
+    next one.  A program that measures it in-episode is right on all of them.
+
+    The delivered set is the frozen original-21 library's route for this task
+    (six skills): the direction legs (``thread-direction-by-legs``), the
+    shear-to-millimetre conversion (``mirrored-shear-slide``), the lead
+    measurement (``lead-by-overshoot``), the seat reading
+    (``seat-by-slide-collapse``), the depth scale and the channel rule.
+
+    What is left to learn is the operating procedure around those readings:
+    how to grasp the glass, how far to feed, how to re-set the wrist (the old
+    library has no ``wrist-limit-segmentation``), how many blocks to run, and
+    how to recover from a dead raise or a refused motion.
+
+    The task is served one seed per process (the thread lead is sampled before
+    UIPC initialises), so its config sets ``server_lifecycle: per_seed``.
+    """
+
+    prompt = PROMPT_TRACE
+    tactile_skills = (
+        "depth-grip-scale",
+        "lead-by-overshoot",
+        "mirrored-shear-slide",
+        "seat-by-slide-collapse",
+        "shear-vs-displacement",
+        "thread-direction-by-legs",
+    )
 
 
 class UniVTACBulbTighteningPerceptionCodeEnv(UniVTACBulbTighteningCodeEnv):

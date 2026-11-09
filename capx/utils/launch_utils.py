@@ -141,7 +141,9 @@ def _load_config(args: LaunchArgs) -> tuple[Any, dict[str, Any], list]:
         "use_oracle_code": args.use_oracle_code
         if args.use_oracle_code is not None
         else configs_dict.get("use_oracle_code", False),
-        "resume_idx": configs_dict.get("resume_idx", None),
+        "resume_idx": args.resume_idx
+        if args.resume_idx is not None
+        else configs_dict.get("resume_idx", None),
         "use_visual_feedback": args.use_visual_feedback
         if args.use_visual_feedback is not None
         else configs_dict.get("use_visual_feedback", False),
@@ -171,7 +173,36 @@ def _load_config(args: LaunchArgs) -> tuple[Any, dict[str, Any], list]:
         # whose ops are structurally too long for the 2400 s default.  None
         # means "use the default", so configs that omit it are unaffected.
         "exec_alarm_seconds": configs_dict.get("exec_alarm_seconds", None),
+        # Cross-seed trace experiment.  "last" injects the most recent record
+        # below the trial id into the initial prompt; "off" leaves the prompt
+        # unchanged.  CLI values win over YAML.
+        "trace_mode": str(
+            args.trace_mode
+            if args.trace_mode is not None
+            else configs_dict.get("trace_mode", "off")
+        ).lower(),
+        "trace_max_chars": args.trace_max_chars
+        if args.trace_max_chars is not None
+        else configs_dict.get("trace_max_chars", 12000),
     }
+
+    if merged_config["trace_mode"] not in ("off", "last"):
+        raise ValueError(
+            f"trace_mode must be 'off' or 'last', got {merged_config['trace_mode']!r}"
+        )
+
+    # The skill switch is read while the env builds its prompt, so it has to
+    # land in the cfg dict before instantiate(); a merged-config key alone
+    # would be too late.  An explicit CLI value wins over the YAML.
+    env_cfg = env_factory.get("cfg")
+    if isinstance(env_cfg, dict):
+        if args.deliver_tactile_skills is not None:
+            env_cfg["deliver_tactile_skills"] = args.deliver_tactile_skills
+        merged_config["deliver_tactile_skills"] = bool(
+            env_cfg.get("deliver_tactile_skills", True)
+        )
+    else:
+        merged_config["deliver_tactile_skills"] = True
 
     return env_factory, merged_config, api_servers
 

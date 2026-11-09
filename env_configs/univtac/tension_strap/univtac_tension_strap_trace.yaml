@@ -1,0 +1,56 @@
+# UniVTAC: tension_strap, cross-seed trace experiment.
+#
+# Same task and API as univtac_tension_strap.yaml; the class changes what is
+# delivered:
+#   * the frozen original-21 library's route (5 skills): the gauge, the two
+#     control recipes (ramp and hold), the depth scale and the channel rule;
+#   * no approach, grip or recovery rule -- the old library has none, and that
+#     is what the trace is meant to teach.
+#
+# server_lifecycle: per_seed is REQUIRED here, not a preference: the band
+# modulus is drawn from the seed before UIPC initialises and the task raises on
+# any other combination, so one server process serves exactly one seed.
+# run_trace_chain.sh reads this key and, per seed, stops any server on the
+# port, starts one on that seed, waits for /health, runs the trial, and stops
+# it again.  It is the only way a 30-seed chain runs unattended.
+#
+# Run:
+#   bash scripts/run_trace_chain.sh tension_strap 1 30 <model> 8120 12000
+#
+# A seed costs ~520-820 s of episode plus the server's first reset (~330 s on a
+# loaded machine), so 30 seeds is roughly 7-8 hours.
+
+env:
+  _target_: capx.envs.tasks.tactile.univtac_tension_strap.UniVTACTensionStrapTraceCodeEnv
+  cfg:
+    _target_: capx.envs.tasks.base.CodeExecEnvConfig
+    low_level: env_configs/univtac/tension_strap/low_level_tension_strap.yaml
+    privileged: false
+    apis:
+      - UniVTACTactileApi
+
+api_servers:
+  - _target_: capx.serving.launch_univtac_server.main
+    task: tension_strap
+    port: 8120
+    host: 127.0.0.1
+
+server_lifecycle: per_seed
+
+record_video: true
+# Its own directory: the standard run of this task lives in
+# ./outputs/univtac_tension_strap and must not be overwritten.
+output_dir: ./outputs/univtac_tension_strap_trace
+
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
+
+# Sized in the standard config: an episode that never satisfies a stage runs
+# the whole 60 s of simulated time, which measured ~1950 s of wall clock.
+exec_alarm_seconds: 2400
+
+trials: 5
+resume_idx: 1
+num_workers: 1  # Isaac Sim is not parallel-safe

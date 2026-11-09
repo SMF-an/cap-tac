@@ -107,6 +107,29 @@ class LaunchArgs:
     multiturn_limit: int | None = None
     """Max code blocks per trial in multi-turn mode (default 10)."""
 
+    resume_idx: int | None = None
+    """First trial id to run (default: the YAML's resume_idx, or 1).
+
+    Trial ids are seeds.  Passing ``--resume-idx N --total-trials N`` runs
+    exactly seed N, which is what the per-seed chain driver needs."""
+
+    trace_mode: str | None = None
+    """Carry the previous seed's execution trace into this seed's prompt.
+
+    ``off`` (the default) disables it.  ``last`` reads the most recent record
+    below this trial id from ``<output_dir>/trace_chain`` and appends the
+    formatted trace to the initial prompt.  Requires ``--num-workers 1`` so
+    that the chain is executed in seed order."""
+
+    trace_max_chars: int | None = None
+    """Character cap for the injected trace block (default 12000)."""
+
+    deliver_tactile_skills: bool | None = None
+    """Append the tactile skill block to task prompts (default: YAML or true).
+
+    ``False`` withholds every skill, including ones a task names explicitly.
+    The API documentation and the task prompt are untouched."""
+
     record_video: bool | None = None
     """Whether to record and save videos of the environment execution."""
 

@@ -8,7 +8,7 @@ task_types: [classify, manipulate]
 not_tasks: [blind_pick_balls]
 channels: []
 objects: any
-evidence: Once the object is clear of the table, world-frame deltas move it exactly, so the computed height needs no grasp-offset correction. The blocks, the plates and the pads in these scenes carry their pose origin at their base, so the number to command there is the support's surface itself. The memory-match cans carry it at the centre (their resting centre z is the radius plus the table), so the convention has to be read off the object's resting pose rather than assumed from its class.
+evidence: Once the object is clear of the table, world-frame deltas move it exactly, so the computed height needs no grasp-offset correction. The blocks, the plates and the pads in these scenes carry their pose origin at their base, so the number to command there is the support's surface itself. The memory-match cans carry it on their axis at one end cap — vertically that is the centre (their resting z is the radius plus the table), but along their length it is an end, not a middle. The convention has to be read off the object's resting pose rather than assumed from its class.
 ---
 
 ## How
@@ -19,8 +19,11 @@ pose origin sits:
 - **origin at the base** (the blocks, the plates, the pads) — command the
   origin to the support's surface; the object's own extent never enters the
   number;
-- **origin at the centre** (the memory-match cans) — the support's surface
-  plus half the object's extent along the approach axis.
+- **origin on the axis, at one end** (the memory-match cans) — the support's
+  surface plus half the object's extent along the approach axis; that half is
+  the vertical half-height alone. Along the can's length the origin is an end,
+  so nothing is added there, and adding half the length puts the target 4 cm
+  past the can.
 
 When the *support's* origin is at its base too, its surface is its origin plus
 its own extent. Both numbers come from the scene, not from contact.

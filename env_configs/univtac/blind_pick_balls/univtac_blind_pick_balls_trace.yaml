@@ -1,0 +1,61 @@
+# UniVTAC: blind_pick_balls, cross-seed trace experiment.
+#
+# Same task and API as univtac_blind_pick_balls.yaml; the class changes what is
+# delivered:
+#   * the frozen original-21 library's route (4 skills): the depth scale, the
+#     channel rule, the material reading with its 0.06 bar, and the wide-pad
+#     fact;
+#   * no search, transport or placement rule -- the old library has none, and
+#     that procedure is what the trace is meant to teach.
+#
+# server_lifecycle: per_seed is REQUIRED: ``Task.__init__`` draws the twelve
+# balls' materials from cfg.seed and never redraws them, so a second seed needs
+# a second server process.  run_trace_chain.sh reads this key and owns the
+# server for the whole chain.
+#
+# Run:
+#   bash scripts/run_trace_chain.sh blind_pick_balls 1 10 <model> 8120 12000
+#
+# The task's own clock is 120 s of simulated time (halved from 240 s on
+# 2026-11-04), which is ~2750-3600 s of wall clock at the measured 0.38-0.5 s
+# per control step.  The oracle's path is much shorter (three rakes, one probe,
+# one carry), so a healthy seed should finish well inside that; ten seeds is
+# roughly 4-10 hours and thirty is 12-30 hours.
+#
+# exec_alarm_seconds sits above the task's own clock: it only bounds a run that
+# has already spent the whole simulated episode.
+
+env:
+  _target_: capx.envs.tasks.tactile.univtac_blind_pick_balls.UniVTACBlindPickBallsTraceCodeEnv
+  cfg:
+    _target_: capx.envs.tasks.base.CodeExecEnvConfig
+    low_level: env_configs/univtac/blind_pick_balls/low_level_blind_pick_balls.yaml
+    privileged: false
+    apis:
+      - UniVTACBallApi
+
+api_servers:
+  - _target_: capx.serving.launch_univtac_server.main
+    task: blind_pick_balls
+    port: 8120
+    host: 127.0.0.1
+
+server_lifecycle: per_seed
+
+record_video: true
+# Its own directory: the standard run of this task lives in
+# ./outputs/univtac_blind_pick_balls and must not be overwritten.
+output_dir: ./outputs/univtac_blind_pick_balls_trace
+
+use_visual_feedback: true
+use_img_differencing: true
+visual_differencing_model: gpt-6-astra
+visual_differencing_model_server_url: http://127.0.0.1:8112/chat/completions
+
+exec_alarm_seconds: 7200
+
+# The driver passes --total-trials <seed> --resume-idx <seed>, which overrides
+# these; keep trials >= resume_idx so a hand-launched run still does something.
+trials: 5
+resume_idx: 1
+num_workers: 1  # Isaac Sim is not parallel-safe
