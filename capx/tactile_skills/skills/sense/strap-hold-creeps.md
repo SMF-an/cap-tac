@@ -1,7 +1,7 @@
 ---
 id: R15
 name: strap-hold-creeps
-family: protocol
+family: sense
 summary: Hold the height and the clock, not the reading — over a hold the reading drifts by most of a band, and then recovers.
 task_types: []
 tasks: [tension_strap]

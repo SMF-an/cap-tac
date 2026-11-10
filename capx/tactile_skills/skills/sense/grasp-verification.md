@@ -1,7 +1,7 @@
 ---
 id: R9
 name: grasp-verification
-family: protocol
+family: sense
 summary: Grasp — both depths below 28.3, one pad's displacement above ~1 px at close; in transport, only a sustained rise to 28.3+ means it left; never open unchecked.
 task_types: []
 tasks: [blind_pick, blind_pick_balls]

@@ -1,7 +1,7 @@
 ---
 id: R14
 name: search-continues-after-miss
-family: protocol
+family: act
 summary: A missed grasp or a refused motion — the retract too — costs one candidate, not the episode; catch each, open, and try the next site.
 task_types: []
 tasks: [blind_pick, blind_pick_balls]

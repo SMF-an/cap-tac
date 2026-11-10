@@ -1,7 +1,7 @@
 ---
 id: R4
 name: no-absolute-without-reference
-family: protocol
+family: sense
 summary: With no absolute reference, judge from a difference or a ratio, never absolutely.
 task_types: [classify, screw]
 channels: []

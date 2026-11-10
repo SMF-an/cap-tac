@@ -27,13 +27,21 @@ from pathlib import Path
 
 import yaml
 
-FAMILIES = ("sense", "act", "place", "protocol")
+FAMILIES = ("sense", "act", "place")
 """What a skill is for.
 
-``sense``    read a physical quantity out of the gel
-``act``      let a tactile signal start, stop or correct a motion
-``place``    put an object down and confirm it stayed
-``protocol`` sequence and design rules that span the other three
+``sense``    turn the gel into a number: which channel carries it, what the
+             reading means, what invalidates it, what it cannot tell you
+``act``      what to do with the hand on the strength of a reading: approach,
+             grasp, insert, turn, search
+``place``    set a free object down, carry it, and confirm it stayed
+
+A rule that spans two of these is filed by what it changes.  A reading that
+exists only as the difference between two commanded states is still a reading,
+and the motion a reading starts, stops or corrects is still an act.  The family
+is bookkeeping for whoever maintains the library -- routing is by ``task_types``
+and ``tasks`` alone, and the compact render does not name the family, so moving
+a skill between them changes no prompt but one line's place.
 
 Everything here is delivered to a task, so everything here has to be worth a
 line of that task's prompt.  Disproved ideas are not: they are for whoever
@@ -311,24 +319,45 @@ class TactileSkillLibrary:
             )
         return tuple(s for s in self if task_type in s.task_types)
 
-    def for_task(self, task: str) -> tuple[TactileSkill, ...]:
+    @staticmethod
+    def check_families(families: tuple[str, ...]) -> tuple[str, ...]:
+        """Validate family names, so a typo cannot turn an ablation into a no-op.
+
+        Raises:
+            SkillError: A name is not one of the declared families.
+        """
+        unknown = sorted(set(families) - set(FAMILIES))
+        if unknown:
+            raise SkillError(
+                f"unknown skill family {unknown}; known: {list(FAMILIES)}"
+            )
+        return families
+
+    def for_task(
+        self, task: str, *, exclude_families: tuple[str, ...] = ()
+    ) -> tuple[TactileSkill, ...]:
         """Skills a task receives: its type's, plus the ones naming it.
 
         A skill listing the task in ``not_tasks`` is left out -- it is the
         task's type that routed it there, and on this task its premise is
-        false.
+        false.  ``exclude_families`` drops whole families on top of the
+        routing; it is the ablation knob, and an unknown name raises rather
+        than excluding nothing.
 
         Raises:
             KeyError: The taxonomy does not know the task.
+            SkillError: ``exclude_families`` names a family that does not exist.
         """
         task_type = self.task_type_of(task)
         if task_type is None:
             raise KeyError(
                 f"unknown task {task!r}; known: {sorted(self._type_of_task)}"
             )
+        exclude = self.check_families(tuple(exclude_families))
         return tuple(
             s for s in self
-            if task not in s.not_tasks
+            if s.family not in exclude
+            and task not in s.not_tasks
             and (task_type in s.task_types or task in s.tasks)
         )
 
@@ -338,6 +367,7 @@ class TactileSkillLibrary:
         *,
         compact: bool = True,
         provenance: bool = False,
+        exclude_families: tuple[str, ...] = (),
     ) -> str:
         """The block a task gets, or "" when nothing routes to it.
 
@@ -347,8 +377,10 @@ class TactileSkillLibrary:
                 dozen skills is answering questions the task has not asked
                 yet).  ``False`` renders each skill's whole body.
             provenance: Append evidence and where each skill is written today.
+            exclude_families: Drop every skill of these families; the ablation
+                knob, see ``for_task``.
         """
-        skills = self.for_task(task)
+        skills = self.for_task(task, exclude_families=exclude_families)
         if not skills:
             return ""
         task_type = self.task_type_of(task)

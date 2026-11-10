@@ -1,7 +1,7 @@
 ---
 id: R16
 name: weigh-grasp-by-lift
-family: protocol
+family: sense
 summary: At the 28.5 weighing grip a block that stayed on the table reads as light — lift 3 cm and check the block follows, re-closing at ~28.0 and lifting again if it does not.
 task_types: []
 tasks: [weight_classify]

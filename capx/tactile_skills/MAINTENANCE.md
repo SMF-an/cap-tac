@@ -73,7 +73,7 @@
 ### 2.1 骨架
 
 ```
-skills/<family>/<name>.md，family ∈ sense/act/place/protocol，文件名 = name
+skills/<family>/<name>.md，family ∈ sense/act/place，文件名 = name
 ```
 
 ```markdown

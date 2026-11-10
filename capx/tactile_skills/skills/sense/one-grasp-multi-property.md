@@ -1,7 +1,7 @@
 ---
 id: R2
 name: one-grasp-multi-property
-family: protocol
+family: sense
 summary: Read several properties from one grasp, and weigh before you squeeze — the firm clamp hardness needs destroys the weight reading.
 task_types: [classify]
 channels: []

@@ -1,7 +1,7 @@
 ---
 id: R10
 name: channel-selection
-family: protocol
+family: sense
 summary: Pick the channel that carries structure — shear and anisotropy — every other scalar averages the image.
 task_types: [classify, force, insert, manipulate, screw, wipe]
 # blind_pick_balls separates its materials on the gel's fine relief, which is

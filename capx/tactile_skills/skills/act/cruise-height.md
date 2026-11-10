@@ -1,7 +1,7 @@
 ---
 id: R6
 name: cruise-height
-family: protocol
+family: act
 summary: Travel at a cruise height and descend only at the target.
 task_types: [insert, manipulate, wipe]
 channels: []

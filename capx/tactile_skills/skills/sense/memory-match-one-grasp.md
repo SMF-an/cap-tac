@@ -1,7 +1,7 @@
 ---
 id: R11
 name: memory-match-one-grasp
-family: protocol
+family: sense
 summary: One progressive squeeze per can — 0.50 touches nothing (both pads 34.0 mm), 0.25 is the contact close, both adaptive off; then lift 2 cm and a ±2 mm sag pair.
 task_types: []
 tasks: [tactile_memory_match]

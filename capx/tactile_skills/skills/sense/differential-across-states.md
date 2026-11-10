@@ -1,7 +1,7 @@
 ---
 id: R1
 name: differential-across-states
-family: protocol
+family: sense
 summary: Judge from two commanded states in one grasp — the difference cancels the drift the absolute carries.
 task_types: [classify, force, insert, manipulate, screw, wipe]
 channels: []

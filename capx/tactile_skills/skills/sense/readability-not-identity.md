@@ -1,7 +1,7 @@
 ---
 id: R7
 name: readability-not-identity
-family: protocol
+family: sense
 summary: Say which question the task asks before choosing a criterion — a difference answers same-or-different, and naming one needs a comparison measured in the same run.
 task_types: [classify]
 channels: []

@@ -1,7 +1,7 @@
 ---
 id: R5
 name: regrasp-after-slip
-family: protocol
+family: act
 summary: Once it has slipped, or the gate keeps rejecting, re-grasp — carrying on spends the rest of the motion slipping.
 task_types: [insert, manipulate, screw, wipe]
 channels: [shear, coherence]
