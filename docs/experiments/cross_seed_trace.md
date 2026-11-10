@@ -133,6 +133,53 @@ first seed of a 30-seed run until the exec alarm.  The prompt now also says
 the program is unattended, and that with no earlier attempt the model should
 choose a split, act on it, and print the slope it measured.
 
+## Trace modes
+
+`--trace-mode` (or `CAPX_TRACE_MODE` for `run_trace_chain.sh`) selects what the
+next seed receives.  The default is the original arm and is unchanged:
+
+| mode | what the next seed gets |
+|---|---|
+| `off` | nothing; the prompt is the standard one |
+| `last` | the most recent record only (the arm the first eight chains ran) |
+| `dual` | that record plus the best completed success so far |
+| `card` | the model's four-line experience card for the last record |
+| `dual_card` | cards for the last record and the best success |
+| `window_card` | cards for the last `--trace-window` records plus the best success, with a streak line |
+
+`dual` exists because `last` throws away the only working program on the first
+failure.  In the 2026-11-08/09 chains the model's programs were 0.3-0.9
+similar to the previous program, so the second slot is what a chain that has
+succeeded once can anchor on; when no seed has succeeded yet, `dual` renders
+exactly the same block as `last`.
+
+`card` and `dual_card` add one reflection call per seed, made after the trace
+record is written.  The model sees the same filtered trace the next seed would
+have received and writes four lines (`DID`, `MEASURED`, `WHY IT FAILED` or
+`WHY IT PASSED`, `NEXT TIME`); the card is stored on the record as `card` and
+the next seed gets it instead of the raw program.  The filtered check detail is
+still appended verbatim under the card, so compression cannot lose the exact
+numbers.  If the reflection call fails -- or the record predates card mode --
+the renderer falls back to that seed's raw trace, marked as such, so the chain
+never goes blind.  The card call's token usage is kept under
+`meta["reflection"]`, separate from the trial's own usage.
+
+Both slots are recorded on the next seed: `injected_from_seed` and
+`injected_best_seed`.  A missing seed still falls back to the latest earlier
+record, so a killed seed does not break the chain, but the record names the
+seed it actually used.
+
+`window_card` extends the card arm to the last `--trace-window` (default 3)
+records and records the seeds it used in `injected_window_seeds`.  The window
+is cards, not raw programs, on purpose: one blind_pick_balls program is
+already ~12k characters at the cap, so three raw programs would either double
+the prompt or cut every program's middle.  The one piece of evidence a window
+adds over `dual` -- which is already a two-record window when the last failure
+and the best success are different -- is repetition: when every attempt in the
+window ended the same way, a `STREAK:` line says so once, and the model does
+not have to infer it from three similar programs.  When the streak is absent
+the window is more of the same evidence, which is exactly what the arm tests.
+
 ## The tension_strap arm
 
 `UniVTACTensionStrapTraceCodeEnv` runs the force/time variant: the pair of

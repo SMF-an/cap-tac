@@ -1,7 +1,7 @@
 """Tests for the cross-seed trace chain.
 
 No simulator, no model: the chain is JSON on disk plus a bounded formatter.
-Five things are covered:
+Covered here:
 
   1. A record round-trips and the next seed finds the latest earlier one.
   2. Seed one has nothing to read, and a missing seed does not break the chain.
@@ -10,6 +10,11 @@ Five things are covered:
   4. The framework-appended final check is stripped, and only that exact
      suffix -- a call the model wrote itself is part of its program.
   5. A chain needs an output directory.
+  6. The dual slot picks the best completed success and renders both records.
+  7. A reflection card travels instead of the program, with the raw trace as a
+     fallback, and the trial loop writes one card per finished seed.
+  8. The window arm carries the last k cards, adds the best success when it is
+     older than the window, and states a repeated ending once.
 """
 
 from __future__ import annotations
@@ -21,9 +26,15 @@ import pytest
 
 from capx.envs.trace_chain import (
     TraceRecord,
+    build_reflection_prompt,
     filter_check_detail,
+    format_card_trace,
+    format_dual_trace,
     format_trace,
+    format_window_cards,
+    load_best_trace,
     load_previous_trace,
+    load_recent_traces,
     strip_final_check,
     trace_chain_dir,
     write_injected_block,
@@ -586,3 +597,420 @@ def test_the_trial_loop_injects_the_previous_record(
 
     seed2 = json.loads((chain / "seed_002.json").read_text())
     assert seed2["injected_from_seed"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Dual-slot and experience-card modes
+# ---------------------------------------------------------------------------
+
+def test_load_best_trace_picks_the_latest_success(tmp_path: Path) -> None:
+    write_trace(tmp_path, _record(2, task_completed=False))
+    write_trace(tmp_path, _record(3, task_completed=True, reward=1.0))
+    write_trace(tmp_path, _record(4, task_completed=False))
+
+    best = load_best_trace(tmp_path, 5)
+    assert best is not None and best.seed == 3
+    # The two slots are different records: the immediate predecessor failed.
+    previous = load_previous_trace(tmp_path, 5)
+    assert previous is not None and previous.seed == 4
+    # Nothing below the success itself.
+    assert load_best_trace(tmp_path, 3) is None
+
+
+def test_load_best_trace_ignores_an_incomplete_success(tmp_path: Path) -> None:
+    write_trace(
+        tmp_path,
+        _record(1, task_completed=True, reward=1.0, complete=False, timed_out=True),
+    )
+    assert load_best_trace(tmp_path, 2) is None
+
+
+def test_dual_trace_carries_the_last_attempt_and_the_best_success() -> None:
+    last = _record(4, code="close_gripper(target=20.5)", task_completed=False)
+    best = _record(3, code="close_gripper(target=28.5)", task_completed=True, reward=1.0)
+
+    block = format_dual_trace(last, best)
+    assert "PREVIOUS ATTEMPT - seed 4 (FAILED)" in block
+    assert "BEST SUCCESS SO FAR - seed 3 (SUCCEEDED)" in block
+    assert "close_gripper(target=20.5)" in block
+    assert "close_gripper(target=28.5)" in block
+    # The closing instruction belongs to the block, not to each record.
+    assert block.count("different scene instance") == 1
+
+
+def test_dual_trace_stays_under_the_cap() -> None:
+    last = _record(4, code="x = 1\n" * 5000, stdout="o" * 20000)
+    best = _record(3, code="y = 2\n" * 5000, stdout="p" * 20000,
+                   task_completed=True, reward=1.0)
+    block = format_dual_trace(last, best, max_chars=5000)
+    assert len(block) <= 5000
+
+
+def test_dual_trace_falls_back_without_a_success() -> None:
+    last = _record(4)
+    assert format_dual_trace(last, None) == format_trace(last)
+
+
+def test_card_trace_renders_the_card_and_the_check_detail() -> None:
+    record = _record(
+        6,
+        task_completed=False,
+        card=(
+            "DID: pressed midi 60 with press_force_N=0.35\n"
+            "MEASURED: left_force_N=0.36\n"
+            "WHY IT FAILED: the last note was never released\n"
+            "NEXT TIME: release after every note, including the last"
+        ),
+        check_detail={
+            "failure": "wrong_key",
+            "notes_completed": 3,
+            "notes_attempted": 3,
+            "total_notes": 6,
+        },
+    )
+    block = format_card_trace(record)
+    assert "EXPERIENCE CARD - seed 6 (FAILED)" in block
+    assert "DID: pressed midi 60" in block
+    # The exact measurement survives compression.
+    assert "failure: wrong_key" in block
+    assert "notes completed: 3" in block
+
+
+def test_card_trace_falls_back_to_the_raw_trace() -> None:
+    record = _record(7, card="", code="print('fallback')")
+    block = format_card_trace(record)
+    assert "UNAVAILABLE - RAW TRACE" in block
+    assert "print('fallback')" in block
+
+
+def test_reflection_prompt_uses_the_filtered_record() -> None:
+    record = _record(
+        8,
+        code="press_key(60)",
+        check_detail={"failure": "wrong_key", "notes_completed": 2},
+    )
+    text = json.dumps(build_reflection_prompt(record))
+    assert "press_key(60)" in text
+    assert "wrong_key" in text
+    for prefix in ("DID:", "MEASURED:", "WHY IT FAILED:", "NEXT TIME:"):
+        assert prefix in text
+
+
+def test_dual_mode_injects_both_slots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The trial loop wires both slots through to the prompt and the record."""
+    import copy
+    from types import SimpleNamespace
+
+    import capx.envs.trial as trial_mod
+    from capx.envs.launch import LaunchArgs
+
+    class _SeedEnv:
+        def __init__(self) -> None:
+            self.cfg = SimpleNamespace(append_final_check="check_success")
+            self.low_level_env = SimpleNamespace()
+            self.seed = None
+
+        def reset(self, *, seed=None, options=None):
+            self.seed = seed
+            return {
+                "full_prompt": [
+                    {"role": "system", "content": "sys"},
+                    {"role": "user", "content": [{"type": "text", "text": "TASK"}]},
+                ]
+            }, {}
+
+        def final_check_name(self):
+            return "check_success"
+
+        def step(self, code):
+            ok = self.seed == 2
+            return (
+                {"full_prompt": [{"role": "user", "content": [{"type": "text", "text": "x"}]}]},
+                1.0 if ok else 0.0,
+                False,
+                False,
+                {
+                    "sandbox_rc": 0,
+                    "stdout": f"ran seed {self.seed}",
+                    "stderr": "",
+                    "task_completed": ok,
+                    "failure_detail": None,
+                },
+            )
+
+    seen: list[str] = []
+
+    def _fake_query(_args, prompt, *_a, **_k):
+        seen.append(json.dumps(copy.deepcopy(prompt)))
+        return {"content": "```python\nprint('hello')\n```", "reasoning": ""}
+
+    monkeypatch.setattr(trial_mod, "_query_model", _fake_query)
+
+    args = LaunchArgs(config_path="fake.yaml", model="fake-model", debug=False)
+    config = {
+        "output_dir": str(tmp_path),
+        "record_video": False,
+        "use_visual_feedback": False,
+        "use_img_differencing": False,
+        "use_video_differencing": False,
+        "use_wrist_camera": False,
+        "use_oracle_code": False,
+        "trace_mode": "dual",
+        "trace_max_chars": 12000,
+        "deliver_tactile_skills": False,
+        "exec_alarm_seconds": None,
+        "use_parallel_ensemble": False,
+        "use_multimodel": False,
+    }
+    env = _SeedEnv()
+    for seed in (1, 2, 3, 4):
+        trial_mod._run_single_trial(env, seed, args, config, None)
+
+    seed4_prompt = seen[3]
+    assert "PREVIOUS ATTEMPT - seed 3" in seed4_prompt
+    assert "BEST SUCCESS SO FAR - seed 2" in seed4_prompt
+    assert "ran seed 3" in seed4_prompt
+    assert "ran seed 2" in seed4_prompt
+
+    record = json.loads((tmp_path / "trace_chain" / "seed_004.json").read_text())
+    assert record["injected_from_seed"] == 3
+    assert record["injected_best_seed"] == 2
+
+
+def test_card_mode_writes_and_injects_the_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One reflection call per seed; the next seed reads the card, not the code."""
+    import copy
+    from types import SimpleNamespace
+
+    import capx.envs.trial as trial_mod
+    from capx.envs.launch import LaunchArgs
+
+    class _SeedEnv:
+        def __init__(self) -> None:
+            self.cfg = SimpleNamespace(append_final_check="check_success")
+            self.low_level_env = SimpleNamespace()
+            self.seed = None
+
+        def reset(self, *, seed=None, options=None):
+            self.seed = seed
+            return {
+                "full_prompt": [
+                    {"role": "system", "content": "sys"},
+                    {"role": "user", "content": [{"type": "text", "text": "TASK"}]},
+                ]
+            }, {}
+
+        def final_check_name(self):
+            return "check_success"
+
+        def step(self, code):
+            return (
+                {"full_prompt": [{"role": "user", "content": [{"type": "text", "text": "x"}]}]},
+                0.0,
+                False,
+                False,
+                {
+                    "sandbox_rc": 0,
+                    "stdout": f"ran seed {self.seed}",
+                    "stderr": "",
+                    "task_completed": False,
+                    "failure_detail": {"failure": "incomplete"},
+                },
+            )
+
+    seen: list[str] = []
+    reflections: list[str] = []
+
+    def _fake_query(_args, prompt, *_a, **_k):
+        text = json.dumps(copy.deepcopy(prompt))
+        # The reflection request is the one carrying the attempt under review;
+        # an injected card also contains the words "experience card", so keying
+        # on that phrase would misclassify the next seed's code query.
+        if "ATTEMPT UNDER REVIEW" in text:
+            reflections.append(text)
+            return {
+                "content": (
+                    "DID: pressed one key\n"
+                    "MEASURED: force 0.35 N\n"
+                    "WHY IT FAILED: incomplete\n"
+                    "NEXT TIME: release before the next note"
+                ),
+                "reasoning": "",
+            }
+        seen.append(text)
+        return {"content": "```python\nprint('hello')\n```", "reasoning": ""}
+
+    monkeypatch.setattr(trial_mod, "_query_model", _fake_query)
+
+    args = LaunchArgs(config_path="fake.yaml", model="fake-model", debug=False)
+    config = {
+        "output_dir": str(tmp_path),
+        "record_video": False,
+        "use_visual_feedback": False,
+        "use_img_differencing": False,
+        "use_video_differencing": False,
+        "use_wrist_camera": False,
+        "use_oracle_code": False,
+        "trace_mode": "card",
+        "trace_max_chars": 12000,
+        "deliver_tactile_skills": False,
+        "exec_alarm_seconds": None,
+        "use_parallel_ensemble": False,
+        "use_multimodel": False,
+    }
+    env = _SeedEnv()
+    trial_mod._run_single_trial(env, 1, args, config, None)
+    trial_mod._run_single_trial(env, 2, args, config, None)
+
+    assert len(reflections) == 2, "one reflection call per finished seed"
+    record = json.loads((tmp_path / "trace_chain" / "seed_001.json").read_text())
+    assert record["card"].startswith("DID: pressed one key")
+
+    seed2_prompt = seen[1]
+    assert "EXPERIENCE CARD - seed 1 (FAILED)" in seed2_prompt
+    assert "DID: pressed one key" in seed2_prompt
+
+
+# ---------------------------------------------------------------------------
+# Window arm
+# ---------------------------------------------------------------------------
+
+def test_load_recent_traces_returns_newest_first(tmp_path: Path) -> None:
+    for seed in (1, 2, 4):
+        write_trace(tmp_path, _record(seed))
+    assert [r.seed for r in load_recent_traces(tmp_path, 5, 3)] == [4, 2, 1]
+    assert [r.seed for r in load_recent_traces(tmp_path, 5, 2)] == [4, 2]
+    assert [r.seed for r in load_recent_traces(tmp_path, 2, 3)] == [1]
+
+
+def test_window_card_renders_the_window_and_a_streak() -> None:
+    records = [
+        _record(4, card="DID: a", check_detail={"failure": "incomplete"}),
+        _record(3, card="DID: b", check_detail={"failure": "incomplete"}),
+        _record(2, card="DID: c", check_detail={"failure": "incomplete"}),
+    ]
+    block = format_window_cards(records, None)
+    assert "STREAK: the last 3 attempts all ended with 'incomplete'." in block
+    assert "PREVIOUS ATTEMPT - seed 4 (FAILED)" in block
+    assert "EARLIER ATTEMPT - seed 3 (FAILED)" in block
+    assert "EARLIER ATTEMPT - seed 2 (FAILED)" in block
+    assert block.count("different scene instance") == 1
+
+
+def test_window_card_adds_a_best_success_outside_the_window() -> None:
+    records = [
+        _record(5, card="DID: x", check_detail={"failure": "timeout"}),
+        _record(4, card="DID: y", check_detail={"failure": "timeout"}),
+    ]
+    best = _record(2, task_completed=True, reward=1.0, card="DID: z")
+    block = format_window_cards(records, best)
+    assert "BEST SUCCESS SO FAR - seed 2 (SUCCEEDED)" in block
+    assert "STREAK: the last 2 attempts all ended with 'timeout'." in block
+    assert block.count("different scene instance") == 1
+
+
+def test_window_card_has_no_streak_when_endings_differ() -> None:
+    records = [
+        _record(4, card="DID: a", check_detail={"failure": "wrong_key"}),
+        _record(3, card="DID: b", check_detail={"failure": "timeout"}),
+    ]
+    assert "STREAK:" not in format_window_cards(records, None)
+
+
+def test_window_mode_injects_the_last_k_and_records_the_seeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """window_card carries k cards and names the seeds on the new record."""
+    import copy
+    from types import SimpleNamespace
+
+    import capx.envs.trial as trial_mod
+    from capx.envs.launch import LaunchArgs
+
+    class _SeedEnv:
+        def __init__(self) -> None:
+            self.cfg = SimpleNamespace(append_final_check="check_success")
+            self.low_level_env = SimpleNamespace()
+            self.seed = None
+
+        def reset(self, *, seed=None, options=None):
+            self.seed = seed
+            return {
+                "full_prompt": [
+                    {"role": "system", "content": "sys"},
+                    {"role": "user", "content": [{"type": "text", "text": "TASK"}]},
+                ]
+            }, {}
+
+        def final_check_name(self):
+            return "check_success"
+
+        def step(self, code):
+            return (
+                {"full_prompt": [{"role": "user", "content": [{"type": "text", "text": "x"}]}]},
+                0.0,
+                False,
+                False,
+                {
+                    "sandbox_rc": 0,
+                    "stdout": f"ran seed {self.seed}",
+                    "stderr": "",
+                    "task_completed": False,
+                    "failure_detail": {"failure": "incomplete"},
+                },
+            )
+
+    seen: list[str] = []
+
+    def _fake_query(_args, prompt, *_a, **_k):
+        text = json.dumps(copy.deepcopy(prompt))
+        if "ATTEMPT UNDER REVIEW" in text:
+            return {
+                "content": (
+                    "DID: pressed one key\n"
+                    "MEASURED: force 0.35 N\n"
+                    "WHY IT FAILED: incomplete\n"
+                    "NEXT TIME: release before the next note"
+                ),
+                "reasoning": "",
+            }
+        seen.append(text)
+        return {"content": "```python\nprint('hello')\n```", "reasoning": ""}
+
+    monkeypatch.setattr(trial_mod, "_query_model", _fake_query)
+
+    args = LaunchArgs(config_path="fake.yaml", model="fake-model", debug=False)
+    config = {
+        "output_dir": str(tmp_path),
+        "record_video": False,
+        "use_visual_feedback": False,
+        "use_img_differencing": False,
+        "use_video_differencing": False,
+        "use_wrist_camera": False,
+        "use_oracle_code": False,
+        "trace_mode": "window_card",
+        "trace_window": 3,
+        "trace_max_chars": 12000,
+        "deliver_tactile_skills": False,
+        "exec_alarm_seconds": None,
+        "use_parallel_ensemble": False,
+        "use_multimodel": False,
+    }
+    env = _SeedEnv()
+    for seed in (1, 2, 3, 4, 5):
+        trial_mod._run_single_trial(env, seed, args, config, None)
+
+    seed5_prompt = seen[4]
+    assert "PREVIOUS ATTEMPT - seed 4" in seed5_prompt
+    assert "EARLIER ATTEMPT - seed 3" in seed5_prompt
+    assert "EARLIER ATTEMPT - seed 2" in seed5_prompt
+    assert "EARLIER ATTEMPT - seed 1" not in seed5_prompt
+    assert "STREAK: the last 3 attempts all ended with 'incomplete'." in seed5_prompt
+
+    record = json.loads((tmp_path / "trace_chain" / "seed_005.json").read_text())
+    assert record["injected_from_seed"] == 4
+    assert record["injected_window_seeds"] == [4, 3, 2]

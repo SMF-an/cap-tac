@@ -36,7 +36,10 @@ RESET_LINE = re.compile(
 class Row:
     seed: int
     truth: str
+    mode: str
     injected_from: int | None
+    injected_best: int | None
+    window: str
     success: bool
     task_completed: bool | None
     reward: float
@@ -45,10 +48,12 @@ class Row:
     num_regenerations: int
     input_tokens: int
     output_tokens: int
+    reflection_calls: int
     elapsed_s: float
     timed_out: bool
     complete: bool
     injected_chars: int
+    card_chars: int
     cumulative_success: float
     check_detail: str
 
@@ -124,11 +129,19 @@ def _rows(
         # a task success.  sandbox_rc is deliberately not consulted here.
         success = task_completed is not None and bool(task_completed)
         successes += int(success)
+        meta = record.get("meta") or {}
+        reflection = meta.get("reflection") or {}
         rows.append(
             Row(
                 seed=seed,
                 truth=truth.get(seed, "-"),
+                mode=str(meta.get("trace_mode") or "last"),
                 injected_from=record.get("injected_from_seed"),
+                injected_best=record.get("injected_best_seed"),
+                window=",".join(
+                    str(seed)
+                    for seed in (record.get("injected_window_seeds") or [])
+                ),
                 success=success,
                 task_completed=task_completed,
                 reward=float(record.get("reward", 0.0)),
@@ -137,10 +150,12 @@ def _rows(
                 num_regenerations=int(record.get("num_regenerations", 0)),
                 input_tokens=int(record.get("input_tokens", 0)),
                 output_tokens=int(record.get("output_tokens", 0)),
+                reflection_calls=int(reflection.get("calls", 0)),
                 elapsed_s=float(record.get("elapsed_s", 0.0)),
                 timed_out=bool(record.get("timed_out", False)),
                 complete=bool(record.get("complete", False)),
                 injected_chars=injected.get(seed, 0),
+                card_chars=len(record.get("card") or ""),
                 cumulative_success=successes / index,
                 check_detail=_check_detail_text(record),
             )
@@ -181,18 +196,32 @@ def _write_markdown(path: Path, rows: list[Row], chain_dir: Path) -> None:
             f"- Rough seeds: {_rate(rows, lambda r: r.truth == 'rough')}",
             f"- Plain seeds: {_rate(rows, lambda r: r.truth == 'plain')}",
         ]
+    modes: dict[str, int] = {}
+    for row in rows:
+        modes[row.mode] = modes.get(row.mode, 0) + 1
+    mode = max(modes, key=modes.get) if modes else "last"
     lines += [
+        f"- Trace mode: **{mode}**",
         f"- Seeds that received a trace: "
         f"**{sum(1 for r in rows if r.injected_from is not None)}/{len(rows)}**",
+        f"- Seeds that also received a best-success slot: "
+        f"**{sum(1 for r in rows if r.injected_best is not None)}**",
+        f"- Seeds with an experience card: "
+        f"**{sum(1 for r in rows if r.card_chars)}**",
+        f"- Seeds with a window: "
+        f"**{sum(1 for r in rows if r.window)}**",
         f"- Timed out: {sum(1 for r in rows if r.timed_out)}",
         "",
-        "| seed | truth | from | success | reward | rc | blocks | regen | in tok | wall s | trace chars | cum |",
-        "|---:|:---:|---:|:---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| seed | truth | from | best | window | card | success | reward | rc | blocks | regen | in tok | wall s | trace chars | cum |",
+        "|---:|:---:|---:|---:|:---:|:---:|:---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         lines.append(
             f"| {row.seed} | {row.truth} | "
             f"{row.injected_from if row.injected_from is not None else '-'} | "
+            f"{row.injected_best if row.injected_best is not None else '-'} | "
+            f"{row.window or '-'} | "
+            f"{row.card_chars or '-'} | "
             f"{'Y' if row.success else 'N'} | {row.reward:.3f} | {row.sandbox_rc} | "
             f"{row.num_code_blocks} | {row.num_regenerations} | {row.input_tokens} | "
             f"{row.elapsed_s:.1f} | {row.injected_chars} | "

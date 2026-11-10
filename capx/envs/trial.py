@@ -30,11 +30,22 @@ from capx.envs.tasks.base import CodeExecutionEnvBase
 from capx.envs.trace_chain import (
     DEFAULT_MAX_CHARS,
     TraceRecord,
+    build_reflection_prompt,
     filter_check_detail,
+    format_cards,
+    format_dual_trace,
     format_trace,
+    format_window_cards,
+    load_best_trace,
     load_previous_trace,
+    load_recent_traces,
+    parse_card,
     strip_final_check,
     trace_chain_dir,
+    trace_enabled,
+    trace_uses_best,
+    trace_uses_card,
+    trace_uses_window,
     write_injected_block,
     write_trace,
 )
@@ -695,6 +706,8 @@ def _build_trace_record(
     num_code_blocks: int,
     elapsed_s: float,
     injected_from_seed: int | None,
+    injected_best_seed: int | None,
+    injected_window_seeds: list[int] | None,
     meta: dict[str, Any],
     complete: bool,
     timed_out: bool,
@@ -720,6 +733,8 @@ def _build_trace_record(
         num_finishes=num_finishes,
         elapsed_s=elapsed_s,
         injected_from_seed=injected_from_seed,
+        injected_best_seed=injected_best_seed,
+        injected_window_seeds=injected_window_seeds,
         input_tokens=int(usage.get("input_tokens", 0)),
         output_tokens=int(usage.get("output_tokens", 0)),
         reasoning_tokens=int(usage.get("reasoning_tokens", 0)),
@@ -759,6 +774,8 @@ def _write_trace_record(
         num_code_blocks=num_code_blocks,
         elapsed_s=time.time() - trace_ctx["start_time"],
         injected_from_seed=trace_ctx.get("injected_from_seed"),
+        injected_best_seed=trace_ctx.get("injected_best_seed"),
+        injected_window_seeds=trace_ctx.get("injected_window_seeds"),
         meta=trace_ctx.get("meta", {}),
         complete=complete,
         timed_out=timed_out,
@@ -772,34 +789,127 @@ def _inject_previous_trace(
     obs: dict[str, Any],
     config: dict[str, Any],
     trial: int,
-) -> TraceRecord | None:
-    """Append the previous seed's trace to the initial prompt.
+) -> tuple[TraceRecord | None, TraceRecord | None, list[int]]:
+    """Append the chain's evidence to the initial prompt.
 
     Called after the initial visual description, so the VDM never sees the
     trace: it is asked what the current scene looks like, and the previous
     episode is not part of that scene.
+
+    Returns ``(previous, best, window_seeds)``.  ``best`` is None unless the
+    mode keeps a success slot; ``window_seeds`` is empty unless the mode keeps
+    a window.  The caller records all of it on the new trace so an analysis can
+    tell which slots a seed actually received.
     """
     chain_dir = trace_chain_dir(config)
     previous = load_previous_trace(chain_dir, trial)
     if previous is None:
         print(f"[trace] seed {trial}: no earlier record, cold start")
-        return None
+        return None, None, []
 
-    block = format_trace(
-        previous,
-        max_chars=config.get("trace_max_chars", DEFAULT_MAX_CHARS),
-    )
+    mode = config.get("trace_mode", "last")
+    max_chars = int(config.get("trace_max_chars") or DEFAULT_MAX_CHARS)
+    window_seeds: list[int] = []
+    if trace_uses_window(mode):
+        window = load_recent_traces(
+            chain_dir,
+            trial,
+            int(config.get("trace_window") or 3),
+        )
+        best = load_best_trace(chain_dir, trial)
+        block = format_window_cards(window, best, max_chars=max_chars)
+        window_seeds = [record.seed for record in window]
+    else:
+        best = load_best_trace(chain_dir, trial) if trace_uses_best(mode) else None
+        if trace_uses_card(mode):
+            block = format_cards(previous, best, max_chars=max_chars)
+        elif trace_uses_best(mode):
+            block = format_dual_trace(previous, best, max_chars=max_chars)
+        else:
+            block = format_trace(previous, max_chars=max_chars)
+
     content = obs["full_prompt"][-1]["content"]
     if isinstance(content, str):
         obs["full_prompt"][-1]["content"] = [{"type": "text", "text": content}]
         content = obs["full_prompt"][-1]["content"]
     content.append({"type": "text", "text": block})
     write_injected_block(chain_dir, trial, block)
+
+    if window_seeds:
+        slots = f"window {window_seeds}"
+        if best is not None and best.seed not in window_seeds:
+            slots += f" + best seed {best.seed}"
+    else:
+        slots = f"seed {previous.seed}"
+        if best is not None and best.seed != previous.seed:
+            slots += f" + best seed {best.seed}"
     print(
-        f"[trace] seed {trial}: injected seed {previous.seed}'s trace "
-        f"({len(block)} chars)"
+        f"[trace] seed {trial}: injected {slots} ({len(block)} chars, "
+        f"mode={mode})"
     )
-    return previous
+    return previous, best, window_seeds
+
+
+def _write_reflection_card(
+    trace_ctx: dict[str, Any],
+    record: TraceRecord,
+    args: LaunchArgs,
+) -> None:
+    """Ask the model for the experience card of a finished attempt.
+
+    Runs after the record is written: a failed reflection call costs the card,
+    not the attempt.  The next seed falls back to this seed's raw trace when
+    ``card`` is empty, so a card-mode arm degrades to a last-mode seed for that
+    step rather than going blind.
+
+    The card call is billed separately from the trial.  Its tokens are stored
+    under ``meta["reflection"]`` because the trial summary has already been
+    built from the trial's own usage.
+    """
+    # The attempt is over and its record is on disk.  The exec alarm must not
+    # turn a slow reflection into a "timed out" verdict for this seed.
+    import signal
+
+    signal.alarm(0)
+
+    card_args = ModelQueryArgs(
+        model=args.model,
+        server_url=args.server_url,
+        api_key=getattr(args, "api_key", None),
+        temperature=0.0,
+        max_tokens=8192,
+        reasoning_effort="low",
+        debug=getattr(args, "debug", False),
+    )
+    before = token_usage()
+    try:
+        reply = _query_model(card_args, build_reflection_prompt(record))
+    except Exception as exc:  # a card is optional evidence, never a trial
+        print(f"[trace] seed {record.seed}: reflection failed: {exc}")
+        return
+    text = reply.get("content") if isinstance(reply, dict) else reply
+    card = parse_card(str(text or ""))
+    if not card:
+        print(f"[trace] seed {record.seed}: reflection returned an empty card")
+        return
+    after = token_usage()
+    record.card = card
+    record.meta.setdefault("reflection", {}).update(
+        {
+            "input_tokens": after["input_tokens"] - before["input_tokens"],
+            "output_tokens": after["output_tokens"] - before["output_tokens"],
+            "reasoning_tokens": (
+                after["reasoning_tokens"] - before["reasoning_tokens"]
+            ),
+            "cached_tokens": after["cached_tokens"] - before["cached_tokens"],
+            "calls": after["calls"] - before["calls"],
+        }
+    )
+    write_trace(trace_ctx["dir"], record)
+    print(
+        f"[trace] seed {record.seed}: wrote experience card "
+        f"({len(card)} chars)"
+    )
 
 
 def _write_timeout_trace(
@@ -963,7 +1073,7 @@ def _run_single_trial(
     # After the initial visual description on purpose: the VDM must describe
     # the current scene, not read the previous episode into it.
     trace_ctx: dict[str, Any] | None = None
-    if config.get("trace_mode", "off") != "off":
+    if trace_enabled(config.get("trace_mode")):
         trace_ctx = {
             "dir": trace_chain_dir(config),
             "meta": {
@@ -974,12 +1084,16 @@ def _run_single_trial(
                 "deliver_tactile_skills": config.get("deliver_tactile_skills"),
             },
             "injected_from_seed": None,
+            "injected_best_seed": None,
+            "injected_window_seeds": None,
             "turn_records": turn_records,
             "start_time": trial_start_time,
         }
-        previous = _inject_previous_trace(obs, config, trial)
+        previous, best, window_seeds = _inject_previous_trace(obs, config, trial)
         if previous is not None:
             trace_ctx["injected_from_seed"] = previous.seed
+        trace_ctx["injected_best_seed"] = best.seed if best is not None else None
+        trace_ctx["injected_window_seeds"] = window_seeds or None
         if partial_artifacts is not None:
             # Register the context before the model call: a timeout there has
             # no code to show, but the next seed should still learn that this
@@ -1065,7 +1179,7 @@ def _run_single_trial(
     # trace would carry that to the next seed.  The call is a logging
     # convenience -- env.step already calls /check_success for the verdict --
     # so traced runs drop it instead of trying to scrub its output.
-    if final_check and config.get("trace_mode", "off") != "off":
+    if final_check and trace_enabled(config.get("trace_mode")):
         print(
             f"[trace] seed {trial}: not appending {final_check}() "
             "(its output carries ground truth)"
@@ -1297,7 +1411,7 @@ def _run_single_trial(
     )
 
     if trace_ctx is not None:
-        _write_trace_record(
+        record = _write_trace_record(
             trace_ctx,
             trial=trial,
             final_code=final_code,
@@ -1312,6 +1426,8 @@ def _run_single_trial(
             timed_out=False,
             usage=usage,
         )
+        if trace_uses_card(trace_ctx.get("meta", {}).get("trace_mode")):
+            _write_reflection_card(trace_ctx, record, args)
 
     # Keep the per-trial wall-clock in the trial's own summary: the console
     # line is the only other place it exists, and that log lives outside the

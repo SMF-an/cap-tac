@@ -18,6 +18,7 @@ from PIL import Image
 
 from capx.envs.configs.instantiate import instantiate
 from capx.envs.configs.loader import DictLoader
+from capx.envs.trace_chain import TRACE_MODES
 
 # Re-export LLM client symbols for backward compatibility
 from capx.llm.client import (  # noqa: F401
@@ -174,8 +175,9 @@ def _load_config(args: LaunchArgs) -> tuple[Any, dict[str, Any], list]:
         # means "use the default", so configs that omit it are unaffected.
         "exec_alarm_seconds": configs_dict.get("exec_alarm_seconds", None),
         # Cross-seed trace experiment.  "last" injects the most recent record
-        # below the trial id into the initial prompt; "off" leaves the prompt
-        # unchanged.  CLI values win over YAML.
+        # below the trial id; "dual" adds the best success so far; "card" and
+        # "dual_card" inject reflection cards instead of raw programs; "off"
+        # leaves the prompt unchanged.  CLI values win over YAML.
         "trace_mode": str(
             args.trace_mode
             if args.trace_mode is not None
@@ -184,12 +186,23 @@ def _load_config(args: LaunchArgs) -> tuple[Any, dict[str, Any], list]:
         "trace_max_chars": args.trace_max_chars
         if args.trace_max_chars is not None
         else configs_dict.get("trace_max_chars", 12000),
+        "trace_window": args.trace_window
+        if args.trace_window is not None
+        else configs_dict.get("trace_window", 3),
     }
 
-    if merged_config["trace_mode"] not in ("off", "last"):
+    if merged_config["trace_mode"] not in TRACE_MODES:
         raise ValueError(
-            f"trace_mode must be 'off' or 'last', got {merged_config['trace_mode']!r}"
+            f"trace_mode must be one of {', '.join(TRACE_MODES)}; "
+            f"got {merged_config['trace_mode']!r}"
         )
+    trace_window = int(merged_config["trace_window"] or 3)
+    if not 1 <= trace_window <= 10:
+        raise ValueError(
+            "trace_window must be between 1 and 10; "
+            f"got {merged_config['trace_window']!r}"
+        )
+    merged_config["trace_window"] = trace_window
 
     # The skill switch is read while the env builds its prompt, so it has to
     # land in the cfg dict before instantiate(); a merged-config key alone

@@ -10,6 +10,14 @@
 # Example:
 #   bash scripts/run_trace_chain.sh grasp_classify 1 30 gpt-6-astra 8120 12000
 #
+# The trace arm is selected with $CAPX_TRACE_MODE (default "last"):
+#   last       the most recent record only (the original arm)
+#   dual       last record + best completed success so far
+#   card       a four-line experience card for the last record
+#   dual_card  cards for the last record and the best success
+#   window_card  cards for the last $CAPX_TRACE_WINDOW (default 3) records
+#                plus the best success, with a streak line when they agree
+#
 # By default the UniVTAC server must already be running on the same task:
 #   bash scripts/launch_univtac_server.sh grasp_classify 8120 <gpu> 0
 #
@@ -43,6 +51,13 @@ PORT="${5:-8120}"
 MAX_CHARS="${6:-12000}"
 CONFIG_PATH="${7:-env_configs/univtac/${TASK}/univtac_${TASK}_trace.yaml}"
 LLM_SERVER_URL="${CAPX_SERVER_URL:-http://127.0.0.1:8112/chat/completions}"
+# last  - the original arm: the most recent record only
+# dual  - last record + best success so far
+# card  - the model's four-line experience card for the last record
+# dual_card - cards for both slots
+# window_card - cards for the last $CAPX_TRACE_WINDOW records + best success
+TRACE_MODE="${CAPX_TRACE_MODE:-last}"
+TRACE_WINDOW="${CAPX_TRACE_WINDOW:-3}"
 
 cd "$(dirname "$0")/.."
 
@@ -130,7 +145,7 @@ for seed in $(seq "$START" "$END"); do
             "${LOG_DIR}/server_seed_$(printf '%03d' "$seed").log" || exit 1
     fi
     echo "============================================================"
-    echo "  ${TASK} seed ${seed}  ($(date +%H:%M:%S))"
+    echo "  ${TASK} seed ${seed}  mode=${TRACE_MODE} window=${TRACE_WINDOW}  ($(date +%H:%M:%S))"
     echo "============================================================"
     ./.venv/bin/python3 capx/envs/launch.py \
         --config-path "$CONFIG_PATH" \
@@ -138,8 +153,9 @@ for seed in $(seq "$START" "$END"); do
         --server-url "$LLM_SERVER_URL" \
         --total-trials "$seed" \
         --resume-idx "$seed" \
-        --trace-mode last \
+        --trace-mode "$TRACE_MODE" \
         --trace-max-chars "$MAX_CHARS" \
+        --trace-window "$TRACE_WINDOW" \
         2>&1 | tee "${LOG_DIR}/seed_$(printf '%03d' "$seed").log"
 done
 
