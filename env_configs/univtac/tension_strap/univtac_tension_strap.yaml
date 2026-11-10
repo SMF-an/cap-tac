@@ -77,6 +77,12 @@ api_servers:
     port: 8120
     host: 127.0.0.1
 
+# One server process serves exactly one seed: the band modulus is drawn from
+# the seed before UIPC initialises, and the task raises on any other
+# combination.  scripts/run_skill_ablation.sh reads this key and restarts the
+# server per seed.
+server_lifecycle: per_seed
+
 record_video: true
 output_dir: ./outputs/univtac_tension_strap
 

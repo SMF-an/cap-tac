@@ -59,6 +59,11 @@ class CodeExecEnvConfig:
     privileged: bool = False
     enable_render: bool = True
     viser_debug: bool = False
+    # Ablation knob: withhold every tactile skill of these families
+    # ("sense", "act", "place") from the task prompt.  None/empty delivers the
+    # full library.  An unknown name raises when the prompt is built, so a
+    # typo cannot pass as a copy of the baseline under the arm's name.
+    tactile_skills_exclude_families: list[str] | None = None
 
 
 class SimpleExecutor:
@@ -211,6 +216,14 @@ class CodeExecutionEnvBase(Env):
             return True
         return any("get_tactile_data" in api.functions() for api in apis.values())
 
+    def _excluded_skill_families(self) -> tuple[str, ...]:
+        """Families ``cfg`` asked to withhold from the prompt; the ablation knob."""
+        cfg = getattr(self, "cfg", None)
+        value = getattr(cfg, "tactile_skills_exclude_families", None)
+        if value is None and hasattr(cfg, "get"):
+            value = cfg.get("tactile_skills_exclude_families")
+        return tuple(value or ())
+
     def _tactile_skill_block(self) -> str:
         """The tactile-skill block this task's prompt ends with.
 
@@ -229,24 +242,35 @@ class CodeExecutionEnvBase(Env):
         and `tactile_skills_verbose = True` swaps the one-line-per-skill form
         for each skill's whole body.  Naming skills directly skips the tactile
         check: an explicit list is a deliberate choice.
+
+        `cfg.tactile_skills_exclude_families` removes whole families from
+        either path.  That is the ablation knob, not a task setting: it changes
+        what the prompt says without changing what the library holds.
         """
         from capx.tactile_skills import default_library
 
+        library = default_library()
         verbose = bool(getattr(self, "tactile_skills_verbose", False))
+        exclude = library.check_families(self._excluded_skill_families())
         wanted = getattr(self, "tactile_skills", True)
         if wanted is not True:
             if not wanted:
                 return ""
-            library = default_library()
-            skills = [library.get(name) for name in wanted]
+            skills = [
+                s for s in (library.get(name) for name in wanted)
+                if s.family not in exclude
+            ]
             body = "\n".join(s.render(compact=not verbose) for s in skills)
+            if not body:
+                return ""
             return f"TACTILE SKILLS (named by {type(self).__name__}):\n{body}".strip()
 
-        library = default_library()
         task = self._task_name()
         if library.task_type_of(task) is None or not self._reads_the_gel():
             return ""
-        return library.render_for_task(task, compact=not verbose)
+        return library.render_for_task(
+            task, compact=not verbose, exclude_families=exclude
+        )
 
     def _get_complete_prompt(self) -> str:
         """

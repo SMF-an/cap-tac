@@ -49,6 +49,10 @@ class LaunchArgs:
     server_url: str = "http://127.0.0.1:8110/chat/completions"
     """URL of the vLLM server's chat completions endpoint."""
 
+    api_port: int | None = None
+    """Port the task's UniVTAC API server binds, overriding the config's
+    api_servers entry.  Lets several runs share a host on different GPUs."""
+
     model: str = "google/gemini-3.1-pro-preview"
     """Name of the model to query on from the server_url."""
 
@@ -118,6 +122,15 @@ class LaunchArgs:
 
     use_oracle_code: bool | None = None
     """If True, uses pre-defined oracle code instead of querying the model."""
+
+    tactile_skills_exclude_families: list[str] | None = None
+    """Ablation: withhold every tactile skill of these families ("sense",
+    "act", "place") from the task prompt.  Omit for the full library; an
+    unknown name raises when the prompt is built."""
+
+    resume_idx: int | None = None
+    """First trial id to run (the seed is the trial id).  Overrides the YAML's
+    ``resume_idx``; trials run from it through ``total_trials``."""
 
     use_parallel_ensemble: bool | None = None
     """Whether to use parallel ensemble for the coding agent."""

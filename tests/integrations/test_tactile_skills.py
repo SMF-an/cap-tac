@@ -198,6 +198,22 @@ def test_families_are_the_declared_ones(library) -> None:
     assert {s.family for s in library} == set(FAMILIES)
 
 
+def test_excluding_a_family_drops_exactly_that_family(library) -> None:
+    task = "tactile_memory_match"  # every family has a dose on this one
+    full = library.for_task(task)
+    for family in FAMILIES:
+        assert any(s.family == family for s in full), family
+        got = [s.name for s in library.for_task(task, exclude_families=(family,))]
+        assert got == [s.name for s in full if s.family != family], family
+
+
+def test_an_unknown_family_fails_loudly(library) -> None:
+    # "protocol" is the family this library used to have: it must not be read
+    # as a name that excludes nothing and quietly runs as a baseline copy.
+    with pytest.raises(SkillError, match="unknown skill family"):
+        library.for_task("tactile_memory_match", exclude_families=("protocol",))
+
+
 def test_every_skill_has_evidence_and_a_summary(library) -> None:
     for skill in library:
         assert skill.evidence, skill.name
@@ -473,6 +489,7 @@ class _StubTask:
 
     _task_name = CodeExecutionEnvBase._task_name
     _reads_the_gel = CodeExecutionEnvBase._reads_the_gel
+    _excluded_skill_families = CodeExecutionEnvBase._excluded_skill_families
     _tactile_skill_block = CodeExecutionEnvBase._tactile_skill_block
 
     def __init__(self, task: str, **attrs) -> None:
@@ -528,6 +545,44 @@ def test_hook_takes_explicit_names() -> None:
 
 def test_an_empty_tuple_turns_the_block_off() -> None:
     assert _StubTask("weight_classify", tactile_skills=())._tactile_skill_block() == ""
+
+
+def _with_exclusions(task: str, *families: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        low_level=SimpleNamespace(task_name=task),
+        tactile_skills_exclude_families=list(families),
+    )
+
+
+def test_hook_withholds_a_family() -> None:
+    full = _StubTask("tactile_memory_match")._tactile_skill_block()
+    block = _StubTask(
+        "tactile_memory_match", cfg=_with_exclusions("tactile_memory_match", "sense")
+    )._tactile_skill_block()
+    assert "- depth-grip-scale:" in full and "- depth-grip-scale:" not in block
+    assert "- memory-match-one-grasp:" not in block
+    assert "- descend-until-supported:" in block  # place survives
+    assert block.startswith("TACTILE SKILLS (routed to tactile_memory_match")
+
+
+def test_hook_withholds_a_family_from_an_explicit_list() -> None:
+    """The bulb perception variant names its skills instead of routing them;
+    the knob has to reach that path too."""
+    block = _StubTask(
+        "bulb_tightening",
+        tactile_skills=("bulb-close-force", "depth-grip-scale"),
+        cfg=_with_exclusions("bulb_tightening", "sense"),
+    )._tactile_skill_block()
+    assert "bulb-close-force" in block
+    assert "depth-grip-scale" not in block
+
+
+def test_hook_refuses_an_unknown_family() -> None:
+    with pytest.raises(SkillError, match="unknown skill family"):
+        _StubTask(
+            "tactile_memory_match",
+            cfg=_with_exclusions("tactile_memory_match", "protocol"),
+        )._tactile_skill_block()
 
 
 class _API:

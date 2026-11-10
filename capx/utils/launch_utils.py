@@ -111,6 +111,31 @@ def _load_config(args: LaunchArgs) -> tuple[Any, dict[str, Any], list]:
 
     api_servers = configs_dict.get("api_servers", None)
 
+    # Parallel runs share the host, so the port has to be per-run: rewrite the
+    # config's api_servers entry instead of making every arm carry its own YAML.
+    api_port = getattr(args, "api_port", None)
+    if api_port is not None:
+        if not api_servers:
+            raise ValueError(
+                f"YAML config {config_path}: --api-port given but the config "
+                "declares no api_servers"
+            )
+        for server in api_servers:
+            server["port"] = int(api_port)
+
+    # Ablation knob: env_factory is the only path to the env's config, and it
+    # is a plain mapping until instantiate() builds CodeExecEnvConfig, so the
+    # CLI's family list goes in here and the YAML configs stay untouched.
+    exclude_families = getattr(args, "tactile_skills_exclude_families", None)
+    if exclude_families:
+        env_cfg = env_factory.get("cfg")
+        if not isinstance(env_cfg, dict):
+            raise ValueError(
+                f"YAML config {config_path}: env.cfg must be a mapping to "
+                "exclude tactile skill families"
+            )
+        env_cfg["tactile_skills_exclude_families"] = list(exclude_families)
+
     # Merge server URLs and VDM model settings from YAML into args
     # (CLI args take priority; YAML fills in when CLI uses defaults)
     _CLI_DEFAULTS = {
@@ -141,7 +166,9 @@ def _load_config(args: LaunchArgs) -> tuple[Any, dict[str, Any], list]:
         "use_oracle_code": args.use_oracle_code
         if args.use_oracle_code is not None
         else configs_dict.get("use_oracle_code", False),
-        "resume_idx": configs_dict.get("resume_idx", None),
+        "resume_idx": getattr(args, "resume_idx", None)
+        if getattr(args, "resume_idx", None) is not None
+        else configs_dict.get("resume_idx", None),
         "use_visual_feedback": args.use_visual_feedback
         if args.use_visual_feedback is not None
         else configs_dict.get("use_visual_feedback", False),

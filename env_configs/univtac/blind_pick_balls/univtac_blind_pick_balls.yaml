@@ -119,6 +119,11 @@ api_servers:
     port: 8120
     host: 127.0.0.1
 
+# One server process serves exactly one seed: Task.__init__ draws the twelve
+# balls' materials from cfg.seed and never redraws them.
+# scripts/run_skill_ablation.sh reads this key and restarts the server per seed.
+server_lifecycle: per_seed
+
 record_video: true
 output_dir: ./outputs/univtac_blind_pick_balls
 
