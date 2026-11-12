@@ -2,9 +2,10 @@
 #
 # Same task and API as univtac_tactile_memory_match.yaml; the class changes
 # what is delivered:
-#   * the frozen original-21 library's route minus one skill (6 of its 7):
-#     the one-grasp protocol with its 0.50/0.25 closes, the 0.02 texture
-#     split, the depth scale, the load channel and the servo caveat;
+#   * the task's necessary readings (4 skills): the one-grasp protocol with its
+#     0.50/0.25 closes, the 0.02 texture split, the load channel and the servo
+#     caveat; the depth scale and the channel rule are not readings this task
+#     needs;
 #   * NOT gel-shear-weight: this task's weight axis is follow/sag, never the
 #     pads' shear difference, so the old library's rule contradicts
 #     follow-is-signal and is withheld here;

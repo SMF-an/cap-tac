@@ -2,10 +2,14 @@
 #
 # Same task and API as univtac_bulb_tightening.yaml; the class changes what is
 # delivered:
-#   * the frozen original-21 library's route (6 skills): the direction legs,
-#     the shear-to-mm conversion, the lead formula, the seat rule, the depth
-#     scale and the channel rule;
-#   * no grasp, feed, wrist-reset or recovery rule -- the old library has
+#   * the task's necessary readings (7 skills): the direction legs, the
+#     shear-to-mm conversion, the lead formula, the seat rule, the bulb's own
+#     close recipe (bulb-close-force, 27.2 mm), and the two rules that say when
+#     a shear reading is usable (confidence-gate, lattice-pitch-budget).  The
+#     generic depth scale and channel rule are withheld: the depth scale's
+#     20.5 mm rigid-part example is a crush target on the glass (135 N break
+#     force);
+#   * no grasp-pose, feed, wrist-reset or recovery rule -- the old library has
 #     none.  Of the prompt's promises, only the wrist-reset one is rewritten,
 #     because the old library has no wrist-limit-segmentation.
 #

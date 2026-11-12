@@ -4,6 +4,10 @@ name: depth-grip-scale
 family: sense
 summary: Grip tightness is min(left, right) depth — 34 mm no contact, 27.8-29 mm touch without grip, 24 mm a hard press — the servo takes a rigid part deeper (a 20.5 target lands at 20.16-20.75).
 task_types: [classify, force, insert, manipulate, screw, wipe]
+# Withheld from the bulb: the 20.5 mm "rigid part" example below is a crush
+# target on the glass bulb -- the servo reaches the 135 N break force before
+# 20.5.  The bulb's own bulb-close-force carries its 27.2 mm close instead.
+not_tasks: [bulb_tightening]
 channels: [depth]
 objects: any
 evidence: Common to every tactile task in the repo; the 34 mm sentinel is the open-pad reading on this rig, and a compliant object bottoms out near 26.4 mm. The few tenths of a millimetre between the two pads is a mounting property of the fingertips, not of the object. A close that met nothing raises and ends on the 34.00 mm far plane on both pads (blind_pick, 2026-10-20, six sites). A returned close at 27.78-28.98 mm with under 0.01 px of marker displacement is a graze — the gel was pressed, the object was not caught — and those sites shoved the block 11-15 mm (blind_pick, 2026-10-20). The raw displacement is not exactly zero — an untouched pad reads a few thousandths of a pixel, which prints as 0.00 and drifts upward slowly with the sim's image noise. 24.0 mm is a hard press, not a deeper grip; the servo takes a rigid part deeper — a 20.5 target landed at 20.16-20.75 (grasp_classify, 2026-09-14). A returned close with one pad there, the other at 26-27 mm and the two displacements 30-130x apart is a finger on the object's top face (blind_pick seeds 11 and 13, 2026-10-20), and both came apart within the first 20 mm lift, while the holds that survived read both pads at 26.3-27.5 (seeds 4, 9, 15).

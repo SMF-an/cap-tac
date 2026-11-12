@@ -401,20 +401,25 @@ class UniVTACTensionStrapTraceCodeEnv(UniVTACTensionStrapCodeEnv):
     right on all of them.  That is exactly the kind of thing a previous
     attempt's program can teach.
 
-    The delivered set is the frozen original-21 library's route for this task
-    (five skills): the gauge (``strap-load-is-shear-difference``), the two
-    control recipes (``strap-grasp-and-ramp``, ``strap-hold-creeps``), the
-    depth scale and the channel rule.  The old library has no approach, grip
-    or recovery rule -- the grasp itself, staying on the tab and surviving a
-    refused motion are what the trace can teach.
+    The delivered set is the readings this task needs: the gauge
+    (``strap-load-is-shear-difference``), the two control recipes that obtain
+    and hold that reading (``strap-grasp-and-ramp``, ``strap-hold-creeps``),
+    the slip baseline (``slip-pair-baseline``, whose first ``detect_slip``
+    call only sets the reference), and the one probe-required approach fact
+    (``one-call-approach``: a split approach lands up to a millimetre off).
+    The depth scale and the channel rule are not this task's readings and stay
+    withheld.  The old library has no grip or recovery rule -- the grasp
+    itself, staying on the tab and surviving a refused motion are what the
+    trace can teach.
     """
 
     prompt_template = PROMPT_TRACE
     prompt = PROMPT_TRACE.format(goal=goal_sentence(sample_sequence(0)))
     tactile_skills = (
-        "depth-grip-scale",
-        "shear-vs-displacement",
+        "strap-load-is-shear-difference",
         "strap-grasp-and-ramp",
         "strap-hold-creeps",
-        "strap-load-is-shear-difference",
+        "slip-pair-baseline",
+        # probe-required approach fact: a split approach lands up to 1 mm off
+        "one-call-approach",
     )

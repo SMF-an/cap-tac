@@ -2,8 +2,10 @@
 #
 # Same task and API as univtac_tension_strap.yaml; the class changes what is
 # delivered:
-#   * the frozen original-21 library's route (5 skills): the gauge, the two
-#     control recipes (ramp and hold), the depth scale and the channel rule;
+#   * the task's necessary readings (4 skills): the gauge, the two control
+#     recipes (ramp and hold), and the slip baseline (detect_slip's first call
+#     only sets the reference); the depth scale and the channel rule are not
+#     readings this task needs;
 #   * no approach, grip or recovery rule -- the old library has none, and that
 #     is what the trace is meant to teach.
 #

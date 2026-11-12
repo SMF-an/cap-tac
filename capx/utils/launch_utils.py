@@ -175,9 +175,9 @@ def _load_config(args: LaunchArgs) -> tuple[Any, dict[str, Any], list]:
         # means "use the default", so configs that omit it are unaffected.
         "exec_alarm_seconds": configs_dict.get("exec_alarm_seconds", None),
         # Cross-seed trace experiment.  "last" injects the most recent record
-        # below the trial id; "dual" adds the best success so far; "card" and
-        # "dual_card" inject reflection cards instead of raw programs; "off"
-        # leaves the prompt unchanged.  CLI values win over YAML.
+        # below the trial id; "card" injects a reflection card instead of the
+        # raw program; "window_card" injects the last few cards plus the best
+        # success; "off" leaves the prompt unchanged.  CLI values win over YAML.
         "trace_mode": str(
             args.trace_mode
             if args.trace_mode is not None
@@ -189,6 +189,40 @@ def _load_config(args: LaunchArgs) -> tuple[Any, dict[str, Any], list]:
         "trace_window": args.trace_window
         if args.trace_window is not None
         else configs_dict.get("trace_window", 3),
+        # Run-local provisional skills.  The editor rewrites a short list from
+        # the chain's own attempts and the next seed receives it; the curated
+        # library in capx/tactile_skills is never modified.  See
+        # capx/envs/learned_skills.py for the storage and gating rules.
+        "learned_skills": bool(configs_dict.get("learned_skills", False)),
+        "learned_skills_inject": bool(
+            configs_dict.get("learned_skills_inject", True)
+        ),
+        "learned_skills_max": int(configs_dict.get("learned_skills_max", 6)),
+        "learned_skills_evidence": int(
+            configs_dict.get("learned_skills_evidence", 2)
+        ),
+        "learned_skills_model": configs_dict.get("learned_skills_model", None),
+        # What the editor sees besides the raw attempt.  The program is small
+        # and recovers control flow; the task prompt carries the per-seed
+        # goal; the image is never included (the VDM text already describes
+        # the scene, and the base64 payload is megabytes).
+        "learned_skills_include_code": bool(
+            configs_dict.get("learned_skills_include_code", True)
+        ),
+        "learned_skills_include_prompt": bool(
+            configs_dict.get("learned_skills_include_prompt", True)
+        ),
+        "learned_skills_code_max_chars": int(
+            configs_dict.get("learned_skills_code_max_chars", 20000)
+        ),
+        # The editor reads one attempt's raw log and the run document; these
+        # are the two hard budgets that keep that call affordable.
+        "learned_skills_log_max_chars": int(
+            configs_dict.get("learned_skills_log_max_chars", 120000)
+        ),
+        "learned_skills_doc_max_chars": int(
+            configs_dict.get("learned_skills_doc_max_chars", 12000)
+        ),
     }
 
     if merged_config["trace_mode"] not in TRACE_MODES:
@@ -203,6 +237,35 @@ def _load_config(args: LaunchArgs) -> tuple[Any, dict[str, Any], list]:
             f"got {merged_config['trace_window']!r}"
         )
     merged_config["trace_window"] = trace_window
+
+    learned_max = int(merged_config["learned_skills_max"] or 6)
+    if not 1 <= learned_max <= 12:
+        raise ValueError(
+            "learned_skills_max must be between 1 and 12; "
+            f"got {merged_config['learned_skills_max']!r}"
+        )
+    merged_config["learned_skills_max"] = learned_max
+    learned_evidence = int(merged_config["learned_skills_evidence"] or 2)
+    if not 1 <= learned_evidence <= 5:
+        raise ValueError(
+            "learned_skills_evidence must be between 1 and 5; "
+            f"got {merged_config['learned_skills_evidence']!r}"
+        )
+    merged_config["learned_skills_evidence"] = learned_evidence
+    learned_log_max = int(merged_config["learned_skills_log_max_chars"] or 120000)
+    if not 4000 <= learned_log_max <= 200000:
+        raise ValueError(
+            "learned_skills_log_max_chars must be between 4000 and 200000; "
+            f"got {merged_config['learned_skills_log_max_chars']!r}"
+        )
+    merged_config["learned_skills_log_max_chars"] = learned_log_max
+    learned_doc_max = int(merged_config["learned_skills_doc_max_chars"] or 12000)
+    if not 2000 <= learned_doc_max <= 40000:
+        raise ValueError(
+            "learned_skills_doc_max_chars must be between 2000 and 40000; "
+            f"got {merged_config['learned_skills_doc_max_chars']!r}"
+        )
+    merged_config["learned_skills_doc_max_chars"] = learned_doc_max
 
     # The skill switch is read while the env builds its prompt, so it has to
     # land in the cfg dict before instantiate(); a merged-config key alone

@@ -1649,13 +1649,22 @@ def _sim_gripper(action: str, force_threshold: float | None,
                       f"gel reads {'n/a' if estimate is None else f'{estimate:.3f}N'}")
         elif adaptive_for_action and depth_threshold is not None:
             # Tactile-stopped close ends at the contact qpos, not zero:
-            # accept if the gel deformation reached the depth threshold.
+            # accept only when every pad landed within one millimetre of the
+            # depth this request asked for.  The check has to be two-sided:
+            # until 2026-11-11 it bounded only the shallow side
+            # (``depth < target + 1``), so a close that jammed at the depth
+            # camera's near clip (24.2 mm on a 28.5 mm target) was reported as
+            # a success and the caller had to invent its own guard.  A pad
+            # that reports 0 mm (missing) fails for the same reason: it is
+            # 28.5 mm away from a 28.5 mm target.
             # The threshold must be the one this request asked for, not the
             # task config's: with a request-level force_threshold the task
-            # config usually holds None, and the check below would then
-            # reject a close that landed exactly as instructed.
-            reached = depth < depth_threshold + 1.0
-            detail = (f"qpos={final_qpos:.4f} depth={depth:.2f}mm "
+            # config usually holds None.
+            pad_depths = _TASK._tactile_manager.get_min_depth()
+            reached = bool(
+                torch.all(torch.abs(pad_depths - depth_threshold) <= 1.0).item()
+            )
+            detail = (f"qpos={final_qpos:.4f} depths={pad_depths.tolist()} "
                       f"target={depth_threshold:.2f}mm")
         else:
             # Position close: the fingers stop on the commanded qpos — or

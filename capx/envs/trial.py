@@ -26,14 +26,25 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from PIL import Image
 
+from capx.envs.learned_skills import (
+    apply_patch,
+    build_editor_messages,
+    clamp_doc,
+    format_block,
+    load_overlay,
+    load_run_doc,
+    parse_editor_reply,
+    seeds_mentioned,
+    write_overlay,
+    write_run_doc,
+)
 from capx.envs.tasks.base import CodeExecutionEnvBase
 from capx.envs.trace_chain import (
     DEFAULT_MAX_CHARS,
     TraceRecord,
     build_reflection_prompt,
     filter_check_detail,
-    format_cards,
-    format_dual_trace,
+    format_card_trace,
     format_trace,
     format_window_cards,
     load_best_trace,
@@ -43,7 +54,6 @@ from capx.envs.trace_chain import (
     strip_final_check,
     trace_chain_dir,
     trace_enabled,
-    trace_uses_best,
     trace_uses_card,
     trace_uses_window,
     write_injected_block,
@@ -820,11 +830,9 @@ def _inject_previous_trace(
         block = format_window_cards(window, best, max_chars=max_chars)
         window_seeds = [record.seed for record in window]
     else:
-        best = load_best_trace(chain_dir, trial) if trace_uses_best(mode) else None
+        best = None
         if trace_uses_card(mode):
-            block = format_cards(previous, best, max_chars=max_chars)
-        elif trace_uses_best(mode):
-            block = format_dual_trace(previous, best, max_chars=max_chars)
+            block = format_card_trace(previous, max_chars=max_chars)
         else:
             block = format_trace(previous, max_chars=max_chars)
 
@@ -912,6 +920,247 @@ def _write_reflection_card(
     )
 
 
+def _env_task_name(env: CodeExecutionEnvBase) -> str:
+    """The simulator's task name, or "" when the env does not expose one."""
+    fn = getattr(env, "_task_name", None)
+    try:
+        return fn() if callable(fn) else ""
+    except Exception:
+        return ""
+
+
+def _env_base_skills(env: CodeExecutionEnvBase) -> str:
+    """The curated skill block this task's prompt already carries."""
+    fn = getattr(env, "_tactile_skill_block", None)
+    try:
+        return fn() if callable(fn) else ""
+    except Exception:
+        return ""
+
+
+def _initial_prompt_text(obs: dict[str, Any]) -> str:
+    """The text parts of the prompt this seed was given, images excluded.
+
+    Captured after the initial visual description is appended (so the VDM's
+    scene reading is included) and before the learned-skill block is injected
+    (so the editor does not see its own previous rules twice).
+    """
+    parts: list[str] = []
+    for message in obs.get("full_prompt") or []:
+        content = message.get("content")
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    parts.append(part.get("text") or "")
+    return "\n\n".join(part for part in parts if part.strip())
+
+
+def _inject_learned_skills(
+    obs: dict[str, Any],
+    config: dict[str, Any],
+    trial: int,
+    base_skills: str = "",
+) -> dict[str, Any] | None:
+    """Append this run's learned rules to the seed's curated skill block.
+
+    The rules go immediately after the curated TACTILE SKILLS block and in the
+    same ``- name: rule`` form, with no heading of their own: to the agent they
+    are skills, and their provenance stays in the run document on disk.  When
+    the task delivers no curated block, they fall back to a trailing text part.
+
+    Returns what the seed received, for the record's meta; None when the
+    switch is off or nothing has been learned yet.  Called before the trace
+    block on purpose: the distilled rules are read first, the raw evidence
+    they were drawn from after them.
+
+    ``learned_skills_inject: false`` still returns the version that *would*
+    have been injected, so the placebo arm can be audited like the real one.
+    """
+    if not config.get("learned_skills"):
+        return None
+    overlay = load_overlay(config, trial)
+    if not overlay.rules:
+        return None
+    injected = bool(config.get("learned_skills_inject", True))
+    info = {
+        "seed": overlay.seed,
+        "revision": overlay.revision,
+        "rules": [skill.name for skill in overlay.rules],
+        "injected": injected,
+    }
+    if not injected:
+        print(
+            f"[trace] seed {trial}: learned skills v{overlay.revision} "
+            f"withheld (placebo)"
+        )
+        return info
+    block = format_block(overlay)
+    content = obs["full_prompt"][-1]["content"]
+    if isinstance(content, str):
+        obs["full_prompt"][-1]["content"] = [{"type": "text", "text": content}]
+        content = obs["full_prompt"][-1]["content"]
+    first = content[0] if content else None
+    spliced = False
+    if (
+        isinstance(first, dict)
+        and first.get("type") == "text"
+        and isinstance(first.get("text"), str)
+        and base_skills.strip()
+        and base_skills in first["text"]
+    ):
+        first["text"] = first["text"].replace(
+            base_skills, base_skills + "\n" + block, 1
+        )
+        spliced = True
+    if not spliced:
+        content.append({"type": "text", "text": block})
+    print(
+        f"[trace] seed {trial}: injected {len(overlay.rules)} learned "
+        f"skill(s) v{overlay.revision} ({len(block)} chars)"
+    )
+    return info
+
+
+def _write_learned_skills(
+    trace_ctx: dict[str, Any],
+    record: TraceRecord,
+    args: LaunchArgs,
+    config: dict[str, Any],
+) -> None:
+    """Ask the editor model to update the run document and the skill list.
+
+    One call, two artefacts: the editor reads the previous run document and
+    this attempt's raw log and returns ``{"doc": ..., "operations": [...]}``;
+    the code writes the document first, then applies the skill patch.  There
+    is no card and no window of older attempts -- history lives in the
+    document.  A failed call costs only this seed's version; the next seed
+    reads the latest earlier document and overlay.
+    """
+    # The attempt is over; a slow editor must not be turned into a timeout.
+    import signal
+
+    signal.alarm(0)
+
+    chain_dir = trace_ctx["dir"]
+    overlay = load_overlay(config, record.seed)
+    run_doc = load_run_doc(config, record.seed)
+
+    task = trace_ctx.get("task_name") or ""
+    base_skills = trace_ctx.get("base_skills") or ""
+
+    max_skills = int(config.get("learned_skills_max") or 6)
+    min_evidence = int(config.get("learned_skills_evidence") or 2)
+    doc_max_chars = int(config.get("learned_skills_doc_max_chars") or 12000)
+    log_max_chars = int(config.get("learned_skills_log_max_chars") or 120000)
+    include_code = bool(config.get("learned_skills_include_code", True))
+    include_prompt = bool(config.get("learned_skills_include_prompt", True))
+    code_max_chars = int(config.get("learned_skills_code_max_chars") or 20000)
+    task_prompt = trace_ctx.get("task_prompt") or ""
+    editor_args = ModelQueryArgs(
+        model=config.get("learned_skills_model")
+        or getattr(args, "model", None),
+        server_url=args.server_url,
+        api_key=getattr(args, "api_key", None),
+        temperature=0.0,
+        # Reasoning tokens count against this budget, and the editor writes an
+        # 11-12k-character document in the same call: 8192 was enough at
+        # reasoning_effort="low" (0-59 reasoning tokens) and is not at
+        # "medium", where a truncated reply would drop the whole version.
+        max_tokens=16384,
+        reasoning_effort="medium",
+        debug=getattr(args, "debug", False),
+    )
+    messages = build_editor_messages(
+        task=task or config.get("task_name") or "unknown",
+        overlay=overlay,
+        base_skills=base_skills,
+        run_doc=run_doc,
+        record=record,
+        max_skills=max_skills,
+        min_evidence=min_evidence,
+        doc_max_chars=doc_max_chars,
+        log_max_chars=log_max_chars,
+        task_prompt=task_prompt if include_prompt else "",
+        include_code=include_code,
+        code_max_chars=code_max_chars,
+    )
+    before = token_usage()
+    # Audit sizes, not the text: the prompt is large and the record only needs
+    # to show that the task prompt and program actually reached the editor.
+    trace_ctx["meta"]["editor_prompt_chars"] = sum(
+        len(part.get("text") or "")
+        for message in messages
+        for part in (message.get("content") or [])
+        if isinstance(part, dict)
+    )
+    trace_ctx["meta"]["editor_task_prompt_chars"] = (
+        len(task_prompt) if include_prompt else 0
+    )
+    try:
+        reply = _query_model(editor_args, messages)
+    except Exception as exc:  # a version is optional evidence, never a trial
+        print(f"[trace] seed {record.seed}: learned-skills editor failed: {exc}")
+        return
+    text = reply.get("content") if isinstance(reply, dict) else reply
+    parsed = parse_editor_reply(str(text or ""))
+    if parsed is None:
+        print(
+            f"[trace] seed {record.seed}: learned-skills editor "
+            "returned no usable document/patch"
+        )
+        return
+    after = token_usage()
+
+    new_doc, clamped = clamp_doc(parsed["doc"], doc_max_chars)
+    # Only seeds this editor has actually seen can support a rule: the ones
+    # the previous document cites, plus the attempt in front of it.
+    available = seeds_mentioned(run_doc) | {record.seed}
+    new_overlay, applied = apply_patch(
+        overlay=overlay,
+        patch=parsed,
+        available_seeds=available,
+        seed=record.seed,
+        max_skills=max_skills,
+        min_evidence=min_evidence,
+    )
+    new_overlay.editor = {
+        "input_tokens": after["input_tokens"] - before["input_tokens"],
+        "output_tokens": after["output_tokens"] - before["output_tokens"],
+        "reasoning_tokens": (
+            after["reasoning_tokens"] - before["reasoning_tokens"]
+        ),
+        "cached_tokens": after["cached_tokens"] - before["cached_tokens"],
+        "calls": after["calls"] - before["calls"],
+    }
+    new_overlay.doc_chars = len(new_doc)
+    new_overlay.doc_clamped = clamped
+
+    write_run_doc(config, record.seed, new_doc)
+    write_overlay(config, new_overlay)
+    record.meta["run_doc"] = {
+        "version": record.seed,
+        "chars": len(new_doc),
+        "clamped": clamped,
+    }
+    record.meta["learned_skills_edit"] = {
+        "version": new_overlay.seed,
+        "revision": new_overlay.revision,
+        "applied": applied,
+        "rejected": new_overlay.rejected,
+        "editor": new_overlay.editor,
+        "rules": [skill.name for skill in new_overlay.rules],
+    }
+    write_trace(chain_dir, record)
+    print(
+        f"[trace] seed {record.seed}: run doc {len(new_doc)} chars"
+        f"{' (clamped)' if clamped else ''}; learned skills "
+        f"v{new_overlay.revision} ({len(new_overlay.rules)} rules; "
+        f"applied {applied or 'none'})"
+    )
+
+
 def _write_timeout_trace(
     partial: dict[str, Any],
     trial: int,
@@ -954,6 +1203,19 @@ def _write_timeout_trace(
         usage=token_usage(),
     )
     print(f"[trace] seed {trial}: wrote timeout record ({len(record.code)} code chars)")
+
+    # A timed-out attempt is evidence too: it is exactly the seed the next one
+    # should learn "this approach ran out of clock" from.
+    if config.get("learned_skills"):
+        editor_args = trace_ctx.get("args")
+        if editor_args is not None:
+            try:
+                _write_learned_skills(trace_ctx, record, editor_args, config)
+            except Exception as editor_exc:
+                print(
+                    f"[trace] seed {trial}: learned-skills update failed: "
+                    f"{editor_exc}"
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -1073,7 +1335,8 @@ def _run_single_trial(
     # After the initial visual description on purpose: the VDM must describe
     # the current scene, not read the previous episode into it.
     trace_ctx: dict[str, Any] | None = None
-    if trace_enabled(config.get("trace_mode")):
+    learned_skills_on = bool(config.get("learned_skills"))
+    if trace_enabled(config.get("trace_mode")) or learned_skills_on:
         trace_ctx = {
             "dir": trace_chain_dir(config),
             "meta": {
@@ -1082,14 +1345,40 @@ def _run_single_trial(
                 "trace_mode": config.get("trace_mode"),
                 "trace_max_chars": config.get("trace_max_chars"),
                 "deliver_tactile_skills": config.get("deliver_tactile_skills"),
+                "learned_skills": config.get("learned_skills"),
+                "learned_skills_inject": config.get("learned_skills_inject"),
+                "learned_skills_max": config.get("learned_skills_max"),
+                "learned_skills_evidence": config.get("learned_skills_evidence"),
+                "learned_skills_include_code": config.get(
+                    "learned_skills_include_code"
+                ),
+                "learned_skills_include_prompt": config.get(
+                    "learned_skills_include_prompt"
+                ),
             },
             "injected_from_seed": None,
             "injected_best_seed": None,
             "injected_window_seeds": None,
             "turn_records": turn_records,
             "start_time": trial_start_time,
+            # Kept for the timeout path, which has no env and no args but
+            # still owes the next seed a version of the learned list.
+            "args": args if learned_skills_on else None,
+            "task_name": _env_task_name(env) if learned_skills_on else "",
+            "base_skills": _env_base_skills(env) if learned_skills_on else "",
+            "task_prompt": _initial_prompt_text(obs) if learned_skills_on else "",
         }
-        previous, best, window_seeds = _inject_previous_trace(obs, config, trial)
+        # Rules first, then the evidence they were distilled from.
+        trace_ctx["meta"]["task_prompt_chars"] = len(trace_ctx["task_prompt"])
+        trace_ctx["meta"]["learned_skills_input"] = _inject_learned_skills(
+            obs, config, trial, trace_ctx["base_skills"]
+        )
+        previous = best = None
+        window_seeds: list[int] = []
+        if trace_enabled(config.get("trace_mode")):
+            previous, best, window_seeds = _inject_previous_trace(
+                obs, config, trial
+            )
         if previous is not None:
             trace_ctx["injected_from_seed"] = previous.seed
         trace_ctx["injected_best_seed"] = best.seed if best is not None else None
@@ -1428,6 +1717,8 @@ def _run_single_trial(
         )
         if trace_uses_card(trace_ctx.get("meta", {}).get("trace_mode")):
             _write_reflection_card(trace_ctx, record, args)
+        if config.get("learned_skills"):
+            _write_learned_skills(trace_ctx, record, args, config)
 
     # Keep the per-trial wall-clock in the trial's own summary: the console
     # line is the only other place it exists, and that log lives outside the

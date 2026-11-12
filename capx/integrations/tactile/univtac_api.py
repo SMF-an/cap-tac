@@ -568,11 +568,13 @@ class UniVTACTactileApi(ApiBase):
         force_threshold is a gel-depth target in mm, where depth DECREASES as
         contact hardens (see get_tactile_data).  Lower values grip firmer.
 
-        With adaptive=True the close is judged by the gel depth it reached, so
-        a close that meets nothing never reaches the target and raises
-        "Gripper action failed" instead of returning a far-plane reading.
-        That is the default for a close that names a depth, and it is why a
-        close that names only an opening runs the travel command instead.
+        With adaptive=True the close is judged by the gel depth it reached: a
+        close that meets nothing, or one that overshoots the target (for
+        example, one that jams at the sensor's near clip), does not land in
+        the accepted band and raises "Gripper action failed" instead of
+        returning that reading as a success.  That is the default for a close
+        that names a depth, and it is why a close that names only an opening
+        runs the travel command instead.
         adaptive=False commands the finger travel directly: a close
         that meets nothing returns the far-plane reading, and one an object
         stops short of the commanded opening raises, the message carrying the

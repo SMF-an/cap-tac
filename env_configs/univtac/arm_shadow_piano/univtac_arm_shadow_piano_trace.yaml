@@ -2,12 +2,12 @@
 #
 # Same task and API as univtac_arm_shadow_piano.yaml; the class changes what is
 # delivered:
-#   * the frozen original-21 library's one skill for this task
-#     (piano-gel-force-band): the force target for each dynamic and what the
-#     estimate does at the top of its range.  The library's taxonomy routes the
-#     task to the `force` family for the config test, but its own comment says
-#     the env class names exactly that one skill -- none of the family's grasp /
-#     carry / load rules describes a single-finger key press;
+#   * the task's necessary reading (1 skill): piano-gel-force-band -- the force
+#     target for each dynamic and what the estimate does at the top of its
+#     range.  The library's taxonomy routes the task to the `force` family for
+#     the config test, but the env class names exactly that one skill -- none
+#     of the family's grasp / carry / load rules describes a single-finger key
+#     press;
 #   * the trace arm's unattended rule and its request to print each press's
 #     estimate (the task's check detail is `_info`, whose fields are mostly
 #     outside the trace allowlist).

@@ -12,9 +12,7 @@
 #
 # The trace arm is selected with $CAPX_TRACE_MODE (default "last"):
 #   last       the most recent record only (the original arm)
-#   dual       last record + best completed success so far
 #   card       a four-line experience card for the last record
-#   dual_card  cards for the last record and the best success
 #   window_card  cards for the last $CAPX_TRACE_WINDOW (default 3) records
 #                plus the best success, with a streak line when they agree
 #
@@ -52,9 +50,7 @@ MAX_CHARS="${6:-12000}"
 CONFIG_PATH="${7:-env_configs/univtac/${TASK}/univtac_${TASK}_trace.yaml}"
 LLM_SERVER_URL="${CAPX_SERVER_URL:-http://127.0.0.1:8112/chat/completions}"
 # last  - the original arm: the most recent record only
-# dual  - last record + best success so far
 # card  - the model's four-line experience card for the last record
-# dual_card - cards for both slots
 # window_card - cards for the last $CAPX_TRACE_WINDOW records + best success
 TRACE_MODE="${CAPX_TRACE_MODE:-last}"
 TRACE_WINDOW="${CAPX_TRACE_WINDOW:-3}"

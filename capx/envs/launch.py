@@ -118,11 +118,10 @@ class LaunchArgs:
 
     ``off`` (the default) disables it.  ``last`` reads the most recent record
     below this trial id from ``<output_dir>/trace_chain`` and appends the
-    formatted trace.  ``dual`` appends that record plus the best completed
-    success so far.  ``card`` replaces the raw program with the model's
-    four-line experience card for the last attempt, and ``dual_card`` uses
-    cards for both slots.  Requires ``--num-workers 1`` so that the chain is
-    executed in seed order."""
+    formatted trace.  ``card`` replaces the raw program with the model's
+    four-line experience card for the last attempt, and ``window_card``
+    carries the last few cards plus the best success so far.  Requires
+    ``--num-workers 1`` so that the chain is executed in seed order."""
 
     trace_max_chars: int | None = None
     """Character cap for the injected trace block (default 12000)."""
@@ -131,7 +130,7 @@ class LaunchArgs:
     """How many recent records a window arm injects (default 3).
 
     Only ``trace_mode=window_card`` reads it; every other mode carries one
-    record (plus, in the dual modes, the best success)."""
+    record."""
 
     deliver_tactile_skills: bool | None = None
     """Append the tactile skill block to task prompts (default: YAML or true).

@@ -8,24 +8,19 @@ initial prompt ends with seed `N-1`'s final program, execution output and
 outcome.  Everything else is a fresh episode: the scene is re-randomized, the
 code namespace is re-created, and no Python state crosses the boundary.
 
-Every arm starts from the **frozen original-21 library** -- the snapshot the
-sibling study uses as its initial delivery
-(`capx/tactile_skills/initial_libraries/original-21-3758efb`, taken from
-`SMF-an/cap-tac` at commit `3758efb`).  That library is 21 skills: sense 13,
-protocol 3, act 5, and no `place` family.  Each trace class names exactly the
-snapshot's route for its task, so the run starts with the same knowledge as
-the sibling study's pilots: the task's judgment constants are present, and
-what is missing is the procedure around them (grasp, transport, placement,
-wrist reset, search).  The trace is meant to teach that procedure.
+Every arm starts from the **tactile readings its task needs**, not the full
+original-21 route.  The readings carry the task's judgment constants; what is
+missing is the procedure around them (grasp, transport, placement, wrist
+reset, search, recovery).  The trace is meant to teach that procedure.  A
+recipe that exists only to obtain the reading -- the bulb's legs/lead/seat,
+the strap's grasp/ramp/hold, the one-grasp protocol, the weigh-by-lift
+protocol -- is part of the reading set.  Generic scales and channel rules
+that the task-specific reading already names are withheld.
 
-For grasp_classify the route is six skills:
-
-1. `texture-slope-two-grips` -- the texture calibration and its 0.06 split;
-2. `depth-grip-scale` -- `min(L, R)` and the 34 / 28.3 / 24 mm reading scale;
-3. `shear-vs-displacement` -- which channel answers which question;
-4. `gel-shear-weight` -- weigh by the two pads' shear difference;
-5. `follow-is-signal` -- the load response is the lift follow-through;
-6. `position-mode-for-yield` -- with the servo on, a soft object reads firmer.
+For grasp_classify the route is one reading: `texture-slope-two-grips` -- the
+texture calibration and its 0.06 split.  The generic depth scale, the weight
+channel, the yield caveat and the channel rule are not readings this task
+needs, so they are withheld.
 
 No placement recipe is delivered: the old library has no `place` family.  The
 prompt's placement promise is therefore rewritten, while its promise about
@@ -55,23 +50,21 @@ also makes the prompt's request to print the comparison still worth doing: the
 placement tells the next seed what went wrong, the stdout tells it what the
 readings were.
 
-The route is the old library's seven minus one, six skills:
+The route is four readings:
 
 1. `memory-match-one-grasp` -- the one-grasp protocol, 0.50 loose / 0.25 firm,
    then the lift and sag pair;
 2. `can-texture-difference` -- the 0.02 anisotropy split;
-3. `depth-grip-scale` -- what a depth reading means and where the servo
-   distorts it;
-4. `follow-is-signal` -- the load response is the lift follow-through;
-5. `position-mode-for-yield` -- the servo caveat;
-6. `shear-vs-displacement` -- which channel answers which question.
+3. `follow-is-signal` -- the load response is the lift follow-through;
+4. `position-mode-for-yield` -- the servo caveat.
 
-The one deviation is `gel-shear-weight`.  The old library routes it to every
-`classify` task, but this task's weight axis is the can's own z -- `follow`
-(how far it rode the lift) and `sag_mm` (its stick-slip spread while
-suspended); see `DIMENSION_AXES` in the task.  The pads' shear difference is
+`gel-shear-weight` is withheld: this task's weight axis is the can's own z --
+`follow` (how far it rode the lift) and `sag_mm` (its stick-slip spread while
+suspended), see `DIMENSION_AXES` in the task.  The pads' shear difference is
 not a feature of the scorer, so the rule would teach a read that decides
-nothing here, and it contradicts `follow-is-signal` in the same block.
+nothing here, and it contradicts `follow-is-signal` in the same block.  The
+generic depth scale and the channel rule are not readings this task needs
+either.
 
 No approach, transport or placement rule is delivered (the old library has
 none), and the prompt still points at the one-grasp protocol because it is
@@ -142,20 +135,16 @@ next seed receives.  The default is the original arm and is unchanged:
 |---|---|
 | `off` | nothing; the prompt is the standard one |
 | `last` | the most recent record only (the arm the first eight chains ran) |
-| `dual` | that record plus the best completed success so far |
 | `card` | the model's four-line experience card for the last record |
-| `dual_card` | cards for the last record and the best success |
 | `window_card` | cards for the last `--trace-window` records plus the best success, with a streak line |
 
-`dual` exists because `last` throws away the only working program on the first
-failure.  In the 2026-11-08/09 chains the model's programs were 0.3-0.9
-similar to the previous program, so the second slot is what a chain that has
-succeeded once can anchor on; when no seed has succeeded yet, `dual` renders
-exactly the same block as `last`.
+`window_card` with `--trace-window 1` is the card pair (the last card plus the
+best success).  Two older arms, `dual` and `dual_card`, are gone: neither was
+ever run end to end, and `dual_card` was exactly that one-record window.
 
-`card` and `dual_card` add one reflection call per seed, made after the trace
-record is written.  The model sees the same filtered trace the next seed would
-have received and writes four lines (`DID`, `MEASURED`, `WHY IT FAILED` or
+`card` adds one reflection call per seed, made after the trace record is
+written.  The model sees the same filtered trace the next seed would have
+received and writes four lines (`DID`, `MEASURED`, `WHY IT FAILED` or
 `WHY IT PASSED`, `NEXT TIME`); the card is stored on the record as `card` and
 the next seed gets it instead of the raw program.  The filtered check detail is
 still appended verbatim under the card, so compression cannot lose the exact
@@ -164,21 +153,21 @@ the renderer falls back to that seed's raw trace, marked as such, so the chain
 never goes blind.  The card call's token usage is kept under
 `meta["reflection"]`, separate from the trial's own usage.
 
-Both slots are recorded on the next seed: `injected_from_seed` and
-`injected_best_seed`.  A missing seed still falls back to the latest earlier
-record, so a killed seed does not break the chain, but the record names the
-seed it actually used.
+The record names the slots it was injected from: `injected_from_seed`, and
+`injected_best_seed` when `window_card` added a best success outside the
+window.  A missing seed still falls back to the latest earlier record, so a
+killed seed does not break the chain, but the record names the seed it
+actually used.
 
 `window_card` extends the card arm to the last `--trace-window` (default 3)
 records and records the seeds it used in `injected_window_seeds`.  The window
 is cards, not raw programs, on purpose: one blind_pick_balls program is
 already ~12k characters at the cap, so three raw programs would either double
 the prompt or cut every program's middle.  The one piece of evidence a window
-adds over `dual` -- which is already a two-record window when the last failure
-and the best success are different -- is repetition: when every attempt in the
-window ended the same way, a `STREAK:` line says so once, and the model does
-not have to infer it from three similar programs.  When the streak is absent
-the window is more of the same evidence, which is exactly what the arm tests.
+adds over `card` is repetition: when every attempt in the window ended the
+same way, a `STREAK:` line says so once, and the model does not have to infer
+it from three similar cards.  When the streak is absent the window is more of
+the same evidence, which is exactly what the arm tests.
 
 ## The tension_strap arm
 
@@ -206,12 +195,13 @@ GPUs come from `CAPX_GPU` (default 0), the startup budget from
 `$CAPX_SERVER_START_TIMEOUT` (default 900 s -- a force task's first reset runs
 the full scene build, measured at ~330 s on a loaded machine).
 
-The route is five skills: the gauge (`strap-load-is-shear-difference`: the
+The route is four readings: the gauge (`strap-load-is-shear-difference`: the
 reference close, 0.93 N per px of the two pads' shear difference and the
 2.3 mm take-up), the two control recipes (`strap-grasp-and-ramp`: climb in
 <=2 mm steps and re-grasp after three dead raises; `strap-hold-creeps`: hold
-the height and the clock, never the reading), plus `depth-grip-scale` and
-`shear-vs-displacement`.
+the height and the clock, never the reading), and the slip baseline
+(`slip-pair-baseline`: the first `detect_slip` call only sets the reference).
+The depth scale and the channel rule are not readings this task needs.
 
 The old library has no approach, grip or recovery rule, so what is left to
 learn is the grasp itself and surviving a refused motion.  The prompt says
@@ -243,13 +233,19 @@ and a program that measures it in-episode is right on all of them.  The task
 raises on any other seed (`Create one force-task process per seed ...`), so the
 config sets `server_lifecycle: per_seed`.
 
-The route is six skills: the direction legs (`thread-direction-by-legs`), the
-shear-to-millimetre conversion (`mirrored-shear-slide`), the lead measurement
-(`lead-by-overshoot`), the seat reading (`seat-by-slide-collapse`), the depth
-scale and the channel rule.
+The route is seven readings: the direction legs (`thread-direction-by-legs`),
+the shear-to-millimetre conversion (`mirrored-shear-slide`), the lead
+measurement (`lead-by-overshoot`), the seat reading (`seat-by-slide-collapse`),
+the bulb's own close recipe (`bulb-close-force`, 27.2 mm), and the two rules
+that say when a shear reading is usable (`confidence-gate`,
+`lattice-pitch-budget`).  The generic depth scale and the channel rule are
+withheld: the depth scale's 20.5 mm rigid-part example is a crush target on
+this glass, and the 2026-11-09..11 trace runs lost every seed at the first
+close to it.  The close target is a constant the run cannot derive from its
+failures, so it is delivered rather than learned.
 
-The old library has no grasp, feed, wrist-reset or recovery rule, so what is
-left to learn is the operating procedure: how to take the glass, how far to
+The old library has no grasp-pose, feed, wrist-reset or recovery rule, so what
+is left to learn is the operating procedure: how to take the glass, how far to
 feed, how to re-set the wrist, how many blocks to run, and what to do after a
 dead raise or a refused motion.  Of the prompt's promises, only the
 wrist-reset one is rewritten, because the old library has no
@@ -277,9 +273,10 @@ program that carries a cell or a material from the previous attempt is wrong by
 construction, and a second seed needs a second server process.  The config sets
 `server_lifecycle: per_seed`.
 
-The route is four skills: the depth scale, the channel rule, the material
-reading with its 0.06 relief bar (`texture-in-relief`) and what fully open pads
-read (`wide-pads-see-nothing`).
+The route is two readings: the material reading with its 0.06 relief bar
+(`texture-in-relief`) and what fully open pads read
+(`wide-pads-see-nothing`).  The depth scale and the channel rule are not
+readings this task needs.
 
 The old library has no search, transport or placement family, so what is left
 to learn is the procedure: how to sweep the rows, how to leave a met ball where
@@ -303,14 +300,13 @@ label is drawn per reset from the reset seed (`_reset_actors` ->
 `rng.choice(['light', 'heavy'])`), so one server process serves every seed and
 the config leaves `server_lifecycle` at `external`.
 
-The route is the frozen original-21 library's seven: `grip-force-by-mass` (the
-~28.5 weighing grip and the 0.2 px shear split), `weigh-grasp-by-lift` (lift
-3 cm, check the block follows, re-close at ~28.0 and lift again if it does
-not), the two shear-channel skills (`gel-shear-weight`,
-`shear-vs-displacement`), the depth scale, the load response
-(`follow-is-signal`) and the servo caveat.  The old library has no approach,
-transport or placement family, so carrying and seating are what the trace is
-meant to teach.
+The route is three readings: `grip-force-by-mass` (the ~28.5 weighing grip and
+the 0.2 px shear split), `weigh-grasp-by-lift` (lift 3 cm, check the block
+follows, re-close at ~28.0 and lift again if it does not) and
+`gel-shear-weight` (the shear channel).  The depth scale, the load response,
+the yield caveat and the channel rule are not readings this task needs.  The
+old library has no approach, transport or placement family, so carrying and
+seating are what the trace is meant to teach.
 
 The served task originally exposed only ``check_success`` (a bool), so the
 trace carried no placement reason at all.  It now has a
@@ -324,11 +320,10 @@ restarted.
 
 `UniVTACHardnessClassifyTraceCodeEnv` is the same shape: the soft/hard label is
 drawn in `_reset_actors` from the reset seed, so the config is
-`external`.  Its route is six -- `hardness-two-closes` (the depth gained from
-position 0.10 to 0.06: ~1.6 mm hard, ~0.8 soft, split 1.2 mm),
-`depth-grip-scale`, `follow-is-signal`, `gel-shear-weight`,
-`position-mode-for-yield` and `shear-vs-displacement` -- and what is left to
-learn is again the grasp, carry and placement procedure.
+`external`.  Its route is two -- `hardness-two-closes` (the depth gained from
+position 0.10 to 0.06: ~1.6 mm hard, ~0.8 soft, split 1.2 mm) and
+`position-mode-for-yield` (the servo caveat) -- and what is left to learn is
+again the grasp, carry and placement procedure.
 
 ## The arm_shadow_piano arm
 
@@ -337,7 +332,7 @@ each note's dynamic are drawn from the server's seed before the task is built
 (`capx/serving/piano_spec.py`), so a seed needs its own server process; the
 config sets `server_lifecycle: per_seed`.
 
-The delivered set is the one skill the frozen library names for this task,
+The delivered set is the one reading this task needs,
 `piano-gel-force-band`: the 0.35 N light / 0.50 N heavy targets and the tilt
 plateau above 0.43 N where the estimate saturates.  The library's taxonomy
 routes the task to the `force` family for the config test, but its own comment

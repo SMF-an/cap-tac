@@ -176,13 +176,12 @@ class UniVTACArmShadowPianoTraceCodeEnv(UniVTACArmShadowPianoCodeEnv):
     construction, while the press primitive -- approach, servo on the gel's
     force estimate, unload before opening -- is the same on every seed.
 
-    The delivered set is the one skill the frozen original-21 library names
-    for this task (``piano-gel-force-band``): the force target for each
-    dynamic and what the estimate does at the top of its range.  The library's
-    taxonomy routes the task to the ``force`` family for the config test, but
-    its own comment says the env class names exactly that one skill, because
-    none of the family's grasp / carry / load rules describes a single-finger
-    key press.
+    The delivered set is the one reading this task needs
+    (``piano-gel-force-band``): the force target for each dynamic and what the
+    estimate does at the top of its range.  The library's taxonomy routes the
+    task to the ``force`` family for the config test, but the env class names
+    exactly that one skill, because none of the family's grasp / carry / load
+    rules describes a single-finger key press.
 
     The frozen manifest records this skill as excluded from its own DIGIT
     runtime, where ``left_force_N`` and ``close_gripper(press_force_N=...)``

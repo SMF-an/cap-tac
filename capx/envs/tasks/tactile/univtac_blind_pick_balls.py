@@ -660,15 +660,20 @@ class UniVTACBlindPickBallsTraceCodeEnv(UniVTACBlindPickBallsCodeEnv):
     re-samples which cells are occupied, so a program that carries a cell
     address or a material from the previous attempt is wrong by construction.
 
-    The delivered set is the frozen original-21 library's route for this task
-    (four skills): the depth scale, the channel rule, the material reading
-    with its 0.06 relief bar (``texture-in-relief``) and what fully open pads
-    read (``wide-pads-see-nothing``).
+    The delivered set is the two readings this task needs (the material
+    reading with its 0.06 relief bar, ``texture-in-relief``, and what fully
+    open pads read, ``wide-pads-see-nothing``) plus the probe-required facts
+    that no failed attempt's log carries: the arm's reach band
+    (``reach-band-at-ball-height``, a grid measurement), the narrow-gap ball
+    shove (``pass-ball-with-wide-pads``, an offline probe), the bowl release
+    geometry (``bowl-descent-stops-short``, read off two physical traces) and
+    the approach drift (``one-call-approach``, a same-seed measurement).  The
+    generic depth scale and the channel rule are not this task's readings and
+    stay withheld.
 
     What is left to learn is the search and the delivery: how to sweep the
-    rows, how to leave a met ball where it is, how to lift and carry, and
-    where to release.  The old library has no search, transport or placement
-    family.
+    rows, how to lift and carry, and where to release.  The old library has no
+    search, transport or placement family.
 
     The task draws its twelve materials in ``Task.__init__`` from ``cfg.seed``
     and never redraws them, so a second seed needs a second server process;
@@ -677,8 +682,13 @@ class UniVTACBlindPickBallsTraceCodeEnv(UniVTACBlindPickBallsCodeEnv):
 
     prompt = PROMPT_TRACE
     tactile_skills = (
-        "depth-grip-scale",
-        "shear-vs-displacement",
+        # readings
         "texture-in-relief",
         "wide-pads-see-nothing",
+        # probe-required facts: measured on the rig, not carried by a failed
+        # attempt's log
+        "one-call-approach",
+        "pass-ball-with-wide-pads",
+        "reach-band-at-ball-height",
+        "bowl-descent-stops-short",
     )

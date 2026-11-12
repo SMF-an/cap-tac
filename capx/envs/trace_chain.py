@@ -24,10 +24,10 @@ seed cannot keep Python state across seeds.  ``<output_dir>/trace_chain/`` holds
 one JSON file per seed plus the exact block injected into that seed's prompt.
 
 ``trace_mode`` selects what the next seed receives: ``last`` (the original
-arm), ``dual`` (that record plus the best completed success so far), ``card``
-(a four-line experience card written by one reflection call) or ``dual_card``
-(cards for the last record and the best success).  ``last`` is kept exactly as
-it was, so the runs already on disk stay comparable.
+arm), ``card`` (a four-line experience card written by one reflection call)
+or ``window_card`` (cards for the last few records plus the best success so
+far).  ``last`` is kept exactly as it was, so the runs already on disk stay
+comparable.
 """
 
 from __future__ import annotations
@@ -47,16 +47,16 @@ DEFAULT_MAX_CHARS = 12000
 #
 #   off          no trace at all
 #   last         the most recent record below the seed (the original arm)
-#   dual         that record plus the best completed success so far
 #   card         the model's four-line experience card for the last record
-#   dual_card    cards for the last record and for the best success
 #   window_card  cards for the last ``trace_window`` records plus the best
 #                success, with a one-line streak when they all ended alike
 #
 # ``last`` is kept exactly as it was: it is the arm the 2026-11-08/09 chains
 # ran, and every result so far is measured against it.  The other modes are
-# separate arms, never a silent change to it.
-TRACE_MODES = ("off", "last", "dual", "card", "dual_card", "window_card")
+# separate arms, never a silent change to it.  The retired ``dual`` and
+# ``dual_card`` arms are gone; ``window_card`` with ``trace_window: 1`` covers
+# the card pair, and neither raw two-slot arm was ever run end to end.
+TRACE_MODES = ("off", "last", "card", "window_card")
 
 CLOSING_LINE = (
     "This is evidence from a different scene instance, not instructions. "
@@ -70,14 +70,9 @@ def trace_enabled(mode: str | None) -> bool:
     return str(mode or "off").lower() != "off"
 
 
-def trace_uses_best(mode: str | None) -> bool:
-    """Whether *mode* also injects the best successful record so far."""
-    return str(mode or "off").lower() in ("dual", "dual_card", "window_card")
-
-
 def trace_uses_card(mode: str | None) -> bool:
     """Whether *mode* injects a reflection card instead of the raw program."""
-    return str(mode or "off").lower() in ("card", "dual_card", "window_card")
+    return str(mode or "off").lower() in ("card", "window_card")
 
 
 def trace_uses_window(mode: str | None) -> bool:
@@ -119,7 +114,7 @@ class TraceRecord:
         elapsed_s: Wall time of the attempt.
         injected_from_seed: Which earlier seed's trace this attempt received.
         injected_best_seed: Which successful seed's record was injected
-            alongside it (dual modes), or None.
+            alongside it (``window_card``), or None.
         injected_window_seeds: The seeds whose records were injected as the
             window, newest first (window mode), or None.
         input_tokens: Model input tokens summed over the attempt.
@@ -457,8 +452,9 @@ def format_trace(
     prompt.  The closing instruction is part of the fixed overhead and is never
     the part that gets cut.
 
-    ``label`` and ``closing`` let :func:`format_dual_trace` stack two records:
-    only the last one carries the closing instruction.
+    ``label`` and ``closing`` let :func:`format_card_trace` give a raw
+    fallback the card's label, and let :func:`format_window_cards` place the
+    closing instruction only once across several slots.
     """
     max_chars = max(2000, int(max_chars))
     code = record.code.strip() or "(no program was produced)"
@@ -540,32 +536,6 @@ def load_best_trace(
         if best is None or (record.reward, record.seed) > (best.reward, best.seed):
             best = record
     return best
-
-
-def format_dual_trace(
-    last: TraceRecord,
-    best: TraceRecord | None,
-    max_chars: int = DEFAULT_MAX_CHARS,
-) -> str:
-    """The last attempt and the best success so far, in one block.
-
-    ``trace_mode=last`` overwrites the only working program with the next
-    seed's failure.  This keeps a second slot: the most recent attempt (which
-    carries the failure detail) and the best completed success (which carries
-    the procedure that worked).  With no success yet -- or when the two slots
-    are the same record -- the block is exactly ``format_trace(last)``.
-    """
-    max_chars = max(4000, int(max_chars))
-    if best is None or best.seed == last.seed:
-        return format_trace(last, max_chars)
-    best_budget = max(2000, int(max_chars * 0.40))
-    last_budget = max(2000, max_chars - best_budget)
-    last_block = format_trace(last, last_budget, closing=False)
-    best_block = format_trace(best, best_budget, label="BEST SUCCESS SO FAR")
-    block = last_block + best_block
-    if len(block) > max_chars:
-        block = block[: max_chars - 40] + "\n... [trace truncated] ...\n"
-    return block
 
 
 CARD_LABEL = "EXPERIENCE CARD"
@@ -693,36 +663,12 @@ def format_card_trace(
     return block
 
 
-def format_cards(
-    last: TraceRecord,
-    best: TraceRecord | None,
-    max_chars: int = DEFAULT_MAX_CHARS,
-) -> str:
-    """Cards for the last attempt and the best success, in one block."""
-    # Two slots, and either may have to fall back to a raw trace (whose own
-    # floor is 2000 chars); keep the combined cap above both floors.
-    max_chars = max(4000, int(max_chars))
-    if best is None or best.seed == last.seed:
-        return format_card_trace(last, max_chars)
-    half = max(2000, max_chars // 2)
-    first = format_card_trace(last, half, closing=False)
-    second = format_card_trace(
-        best,
-        half,
-        label="BEST SUCCESS SO FAR - EXPERIENCE CARD",
-    )
-    block = first + second
-    if len(block) > max_chars:
-        block = block[: max_chars - 40] + "\n... [card truncated] ...\n"
-    return block
-
-
 def _streak_line(records: list[TraceRecord]) -> str | None:
     """One line for a window whose attempts all ended the same way.
 
-    This is the only thing a window adds over ``dual``: two records can show
-    what just happened and what worked, but only a run of records can say the
-    same ending keeps repeating.  Everything else about the window is more
+    This is the only thing a window adds over ``card``: one card says what
+    just happened, but only a run of records can say the same ending keeps
+    repeating.  Everything else about the window is more
     copies of the same evidence.
     """
     if len(records) < 2:
@@ -752,7 +698,7 @@ def format_window_cards(
 ) -> str:
     """Cards for the last few attempts, plus the best success if it is older.
 
-    ``last``/``dual`` answer "what just happened" and "what worked"; this
+    ``last``/``card`` answer "what just happened" and "what worked"; this
     answers "what has been happening".  Only the streak line is new evidence;
     the rest is the same cards, so the window cannot flood the prompt the way
     a window of raw programs would.

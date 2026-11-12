@@ -3,7 +3,8 @@ id: S8
 name: position-mode-for-yield
 family: sense
 summary: Measure yield with adaptive off — with the servo on a soft object reads firmer than a hard one.
-task_types: [classify]
+task_types: []
+tasks: [hardness_classify, tactile_memory_match]
 channels: [depth]
 objects: compliant objects, whose jaws bottom out at ~26.5 mm
 evidence: A firmer force_threshold on a compliant object is a target the servo can never reach, so with adaptation on it keeps pushing, the jaws bottom out, and the sign of the reading reverses.

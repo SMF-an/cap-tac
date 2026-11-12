@@ -147,26 +147,20 @@ class UniVTACGraspClassifyCodeEnv(CodeExecutionEnvBase):
 class UniVTACGraspClassifyTraceCodeEnv(UniVTACGraspClassifyCodeEnv):
     """The cross-seed trace experiment on grasp_classify.
 
-    The delivered set is the frozen original-21 library's route for this task
-    (six skills): the texture calibration with its 0.06 split
-    (``texture-slope-two-grips``), the depth scale and the two channel rules
-    (``shear-vs-displacement``, ``gel-shear-weight``), plus the two servo
-    caveats (``follow-is-signal``, ``position-mode-for-yield``).
+    The delivered set is the one reading this task needs: the texture
+    calibration with its 0.06 split (``texture-slope-two-grips``).  The
+    generic depth scale, the weight channel, the yield caveat and the channel
+    rule are not readings this task needs, so they are not delivered.
 
     What is left to learn is the procedure: where to grasp, how to place, and
     how to trust the placement.  The old library has no ``place`` family, so
     the prompt's placement promise is rewritten -- the placement recipe is not
     in the skills.
 
-    Compact rendering is enough: each kept skill's summary is the rule.
+    Compact rendering is enough: the kept skill's summary is the rule.
     """
 
     prompt = PROMPT_TRACE
     tactile_skills = (
-        "depth-grip-scale",
-        "follow-is-signal",
-        "gel-shear-weight",
-        "position-mode-for-yield",
-        "shear-vs-displacement",
         "texture-slope-two-grips",
     )

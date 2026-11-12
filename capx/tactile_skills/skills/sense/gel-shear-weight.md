@@ -3,7 +3,8 @@ id: S2
 name: gel-shear-weight
 family: sense
 summary: Weigh by the two pads' shear difference, baselined while the object still rests — depth never shows mass.
-task_types: [classify]
+task_types: []
+tasks: [weight_classify]
 channels: [shear]
 objects: blocks of a few grams to a few hundred; the grip number changes with mass
 evidence: n=12 seeds with 180 g and 1.8 g blocks — heavy 0.72-0.99 px, light 0.001-0.045 px, zero overlap, a 19× separation even with the realised squeeze depth matched. The light grip carried both, so the split is mass and not grip depth.

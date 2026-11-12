@@ -2,9 +2,10 @@
 #
 # Same task and API as univtac_grasp_classify.yaml; the class changes what is
 # delivered:
-#   * the frozen original-21 library's route for this task (6 skills): the
-#     texture calibration with its 0.06 split, the depth scale, the two
-#     channel rules and the two servo caveats;
+#   * the task's necessary reading (1 skill): the texture calibration with its
+#     0.06 split (texture-slope-two-grips).  The generic depth scale, the
+#     weight channel, the yield caveat and the channel rule are not readings
+#     this task needs;
 #   * no placement recipes (the old library has no place family) -- placement
 #     is learned from the trace and the check detail.  The prompt's placement
 #     promise is rewritten to match.

@@ -185,11 +185,12 @@ class UniVTACWeightClassifyTraceCodeEnv(UniVTACWeightClassifyCodeEnv):
     the pads, lifted until it actually hangs, and read as the two pads' shear
     difference -- a single raw reading means nothing.
 
-    The delivered set is the frozen original-21 library's route for this task
-    (seven skills): the weight split (``grip-force-by-mass``, 0.2 px), the
-    weigh-by-lift protocol (``weigh-grasp-by-lift``), the shear channel
-    (``gel-shear-weight``, ``shear-vs-displacement``), the depth scale, the
-    load response (``follow-is-signal``) and the servo caveat.
+    The delivered set is the task's necessary tactile readings: the weight
+    split (``grip-force-by-mass``, 0.2 px), the weigh-by-lift protocol
+    (``weigh-grasp-by-lift``), and the shear channel (``gel-shear-weight``).
+    The generic depth scale, the memory-match load response, the yield caveat
+    and the channel rule are not readings this task needs, so they are not
+    delivered.
 
     What is left to learn is the procedure around the measurement: where to
     grasp, how to carry, and how to set the block down without dragging it off
@@ -198,11 +199,7 @@ class UniVTACWeightClassifyTraceCodeEnv(UniVTACWeightClassifyCodeEnv):
 
     prompt = PROMPT_TRACE
     tactile_skills = (
-        "depth-grip-scale",
-        "follow-is-signal",
         "gel-shear-weight",
         "grip-force-by-mass",
-        "position-mode-for-yield",
-        "shear-vs-displacement",
         "weigh-grasp-by-lift",
     )

@@ -2,9 +2,9 @@
 #
 # Same task and API as univtac_blind_pick_balls.yaml; the class changes what is
 # delivered:
-#   * the frozen original-21 library's route (4 skills): the depth scale, the
-#     channel rule, the material reading with its 0.06 bar, and the wide-pad
-#     fact;
+#   * the task's necessary readings (2 skills): the material reading with its
+#     0.06 bar, and the wide-pad fact; the depth scale and the channel rule are
+#     not readings this task needs;
 #   * no search, transport or placement rule -- the old library has none, and
 #     that procedure is what the trace is meant to teach.
 #

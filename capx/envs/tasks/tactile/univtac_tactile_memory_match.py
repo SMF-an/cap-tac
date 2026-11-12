@@ -559,19 +559,20 @@ class UniVTACTactileMemoryMatchTraceCodeEnv(UniVTACTactileMemoryMatchCodeEnv):
     and both candidates have to be probed, and the match is decided by
     comparing three properties of three cans.
 
-    The delivered set is the frozen original-21 library's route for this task
-    minus one skill (six of its seven): the one-grasp protocol with its two
-    commanded closes (``memory-match-one-grasp``), the texture split
-    (``can-texture-difference``, 0.02), the depth scale, the load channel
-    (``follow-is-signal``), the channel rule and the servo caveat.
+    The delivered set is the readings this task needs: the one-grasp protocol
+    with its two commanded closes (``memory-match-one-grasp``), the texture
+    split (``can-texture-difference``, 0.02), the load channel
+    (``follow-is-signal``), and the position-mode caveat that makes the two
+    closes comparable (``position-mode-for-yield``).  The generic depth scale
+    and the channel rule are not readings this task needs, so they are not
+    delivered.
 
-    The one deviation is ``gel-shear-weight``.  The old library routes it to
-    every ``classify`` task, but this task's weight axis is read from the
-    can's own z -- ``follow`` (how far it rode the lift) and ``sag_mm`` (its
-    stick-slip spread while suspended).  The shear difference is not a feature
-    of this task's scorer at all (``DIMENSION_AXES``), so delivering the shear
-    rule would teach a read that does not decide anything here, and it
-    contradicts ``follow-is-signal`` in the same block.
+    ``gel-shear-weight`` is also withheld.  This task's weight axis is read
+    from the can's own z -- ``follow`` (how far it rode the lift) and
+    ``sag_mm`` (its stick-slip spread while suspended).  The shear difference
+    is not a feature of this task's scorer at all (``DIMENSION_AXES``), so
+    delivering the shear rule would teach a read that does not decide anything
+    here, and it contradicts ``follow-is-signal`` in the same block.
 
     What is left to learn is the procedure that surrounds the measurement:
     how to reach each can, how to carry it, where to set it down, and how to
@@ -582,9 +583,7 @@ class UniVTACTactileMemoryMatchTraceCodeEnv(UniVTACTactileMemoryMatchCodeEnv):
     prompt = PROMPT_TRACE
     tactile_skills = (
         "can-texture-difference",
-        "depth-grip-scale",
         "follow-is-signal",
         "memory-match-one-grasp",
         "position-mode-for-yield",
-        "shear-vs-displacement",
     )

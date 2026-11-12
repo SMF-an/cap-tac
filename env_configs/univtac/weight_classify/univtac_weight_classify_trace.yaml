@@ -2,11 +2,11 @@
 #
 # Same task and API as univtac_weight_classify.yaml; the class changes what is
 # delivered:
-#   * the frozen original-21 library's route for this task (7 skills): the
-#     weight split (grip-force-by-mass, 0.2 px), the weigh-by-lift protocol
-#     (weigh-grasp-by-lift), the shear channel (gel-shear-weight,
-#     shear-vs-displacement), the depth scale, the load response and the servo
-#     caveat;
+#   * the task's necessary readings (3 skills): the weight split
+#     (grip-force-by-mass, 0.2 px), the weigh-by-lift protocol
+#     (weigh-grasp-by-lift), and the shear channel (gel-shear-weight).  The
+#     generic depth scale, the load response, the yield caveat and the channel
+#     rule are not readings this task needs;
 #   * no approach, transport or placement rule -- the old library has none, and
 #     that procedure is what the trace is meant to teach.
 #

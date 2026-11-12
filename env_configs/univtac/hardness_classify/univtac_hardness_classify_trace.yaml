@@ -2,10 +2,9 @@
 #
 # Same task and API as univtac_hardness_classify.yaml; the class changes what
 # is delivered:
-#   * the frozen original-21 library's route for this task (6 skills): the
-#     hardness split (hardness-two-closes, 1.2 mm), the depth scale, the load
-#     response, the shear channel, the servo caveat and the shared classify
-#     rule (gel-shear-weight);
+#   * the task's necessary readings (2 skills): the hardness split
+#     (hardness-two-closes, 1.2 mm) and the servo caveat that makes the two
+#     closes comparable (position-mode-for-yield);
 #   * no approach, transport or placement rule -- the old library has none, and
 #     that procedure is what the trace is meant to teach.
 #

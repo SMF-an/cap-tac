@@ -3,7 +3,8 @@ id: S20
 name: follow-is-signal
 family: sense
 summary: Read how far the can follows the lift as its load response — low follow-through and lopsided pads are signal, not noise.
-task_types: [classify]
+task_types: []
+tasks: [tactile_memory_match]
 channels: [depth]
 objects: the memory-match cans
 evidence: A rigid can can show firm bilateral gel contact and still be left on the table by the lift; that low follow is a real feature and must not invalidate the reading.

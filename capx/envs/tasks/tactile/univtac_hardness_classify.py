@@ -180,10 +180,11 @@ class UniVTACHardnessClassifyTraceCodeEnv(UniVTACHardnessClassifyCodeEnv):
     taken twice at two commanded positions and the two depths compared -- the
     depth of a single close says nothing.
 
-    The delivered set is the frozen original-21 library's route for this task
-    (six skills): the hardness split (``hardness-two-closes``, 1.2 mm), the
-    depth scale, the load response (``follow-is-signal``), the shear channel,
-    the servo caveat and the shared classify rule (``gel-shear-weight``).
+    The delivered set is the two readings this task needs: the hardness split
+    (``hardness-two-closes``, 1.2 mm) and the position-mode caveat that makes
+    the two closes comparable (``position-mode-for-yield``).  The generic
+    depth scale, the memory-match load response, the weight channel and the
+    channel rule are not readings this task needs, so they are not delivered.
 
     What is left to learn is the procedure around the measurement: where to
     grasp, how to carry, and how to set the block down without dragging it off
@@ -192,10 +193,6 @@ class UniVTACHardnessClassifyTraceCodeEnv(UniVTACHardnessClassifyCodeEnv):
 
     prompt = PROMPT_TRACE
     tactile_skills = (
-        "depth-grip-scale",
-        "follow-is-signal",
-        "gel-shear-weight",
         "hardness-two-closes",
         "position-mode-for-yield",
-        "shear-vs-displacement",
     )

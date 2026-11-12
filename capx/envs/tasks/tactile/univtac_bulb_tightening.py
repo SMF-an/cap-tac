@@ -801,16 +801,37 @@ class UniVTACBulbTighteningTraceCodeEnv(UniVTACBulbTighteningCodeEnv):
     carries a lead from the previous attempt is wrong by construction on the
     next one.  A program that measures it in-episode is right on all of them.
 
-    The delivered set is the frozen original-21 library's route for this task
-    (six skills): the direction legs (``thread-direction-by-legs``), the
-    shear-to-millimetre conversion (``mirrored-shear-slide``), the lead
-    measurement (``lead-by-overshoot``), the seat reading
-    (``seat-by-slide-collapse``), the depth scale and the channel rule.
+    The delivered set is the readings this task needs: the direction legs
+    (``thread-direction-by-legs``), the shear-to-millimetre conversion
+    (``mirrored-shear-slide``), the lead measurement (``lead-by-overshoot``),
+    the seat reading (``seat-by-slide-collapse``), the bulb's own close
+    recipe (``bulb-close-force``, ``force_threshold=27.2``), and the two
+    rules that say when a shear reading is usable (``confidence-gate``,
+    ``lattice-pitch-budget``).  The generic ``depth-grip-scale`` and
+    ``shear-vs-displacement`` are withheld: the depth scale's 20.5 mm
+    rigid-part example is a crush target on this glass bulb -- the servo
+    reaches the 135 N break force before 20.5 -- and the 2026-11-09..11 trace
+    runs lost every seed at the first close to it.  The close target is a
+    constant the run cannot derive from its own failures, so it is delivered
+    rather than left to be learned.
+
+    The probe-required facts that no failed attempt's log carries are also
+    delivered: the per-call grasp pose (``bulb-grasp-pose``: the server
+    rebuilds it from the bulb's own pose), the feed/lead coupling
+    (``feed-must-match-lead``: feeds that do not match the thread are refused,
+    measured over 82 twists), the approach drift (``one-call-approach``: a
+    split approach lands up to a millimetre off) and the wrist budget
+    (``wrist-limit-segmentation``: a refusal latches the episode, 120 degrees
+    on one grasp is safe while 135 was refused, and the only way to give the
+    twist back is an empty-hand wind-back on the same servo with
+    ``feed_lead_m=0.0``).  The 2026-11-11 learned runs never found that
+    wind-back from their own failure logs: seventeen seeds burned 120-135
+    degrees on one grasp, died on ``screw_IK_limit``, and the run document's
+    open question was still how the wrist could be physically unwound.
 
     What is left to learn is the operating procedure around those readings:
-    how to grasp the glass, how far to feed, how to re-set the wrist (the old
-    library has no ``wrist-limit-segmentation``), how many blocks to run, and
-    how to recover from a dead raise or a refused motion.
+    how to take the glass, how far to feed, how many blocks to run, and how to
+    recover from a dead raise or a refused motion.
 
     The task is served one seed per process (the thread lead is sampled before
     UIPC initialises), so its config sets ``server_lifecycle: per_seed``.
@@ -818,12 +839,20 @@ class UniVTACBulbTighteningTraceCodeEnv(UniVTACBulbTighteningCodeEnv):
 
     prompt = PROMPT_TRACE
     tactile_skills = (
-        "depth-grip-scale",
-        "lead-by-overshoot",
+        # readings
+        "bulb-close-force",
         "mirrored-shear-slide",
-        "seat-by-slide-collapse",
-        "shear-vs-displacement",
         "thread-direction-by-legs",
+        "lead-by-overshoot",
+        "seat-by-slide-collapse",
+        "confidence-gate",
+        "lattice-pitch-budget",
+        # probe-required facts: server behaviour and measured couplings that
+        # no failed attempt's log carries
+        "bulb-grasp-pose",
+        "feed-must-match-lead",
+        "one-call-approach",
+        "wrist-limit-segmentation",
     )
 
 
@@ -871,7 +900,8 @@ class UniVTACBulbTighteningPerceptionCodeEnv(UniVTACBulbTighteningCodeEnv):
         # sense
         "confidence-gate",
         "contact-flag-is-range",
-        "depth-grip-scale",
+        # depth-grip-scale is withheld from the bulb route: its 20.5 mm
+        # rigid-part example is a crush target here (see the trace class).
         "shear-vs-displacement",
         "slip-pair-baseline",
     )

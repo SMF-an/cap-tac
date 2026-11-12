@@ -152,6 +152,18 @@ def _run_headless_trials(
         if config.get("num_workers", 1) > 1:
             raise ValueError("trace_mode requires --num-workers 1 for seed order")
 
+    # The learned-skills overlay is also a sequence: seed N+1 reads the
+    # version written after seed N, and it lives beside the trace chain.
+    if config.get("learned_skills"):
+        if not config.get("output_dir"):
+            raise ValueError(
+                "learned_skills requires --output-dir / output_dir"
+            )
+        if config.get("num_workers", 1) > 1:
+            raise ValueError(
+                "learned_skills requires --num-workers 1 for seed order"
+            )
+
     # Determine which trials to run (supports resume)
     trial_ids = list(range(1, config["total_trials"] + 1))
     if config.get("resume_idx") is not None:

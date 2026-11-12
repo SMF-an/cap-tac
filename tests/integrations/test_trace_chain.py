@@ -10,10 +10,9 @@ Covered here:
   4. The framework-appended final check is stripped, and only that exact
      suffix -- a call the model wrote itself is part of its program.
   5. A chain needs an output directory.
-  6. The dual slot picks the best completed success and renders both records.
-  7. A reflection card travels instead of the program, with the raw trace as a
+  6. A reflection card travels instead of the program, with the raw trace as a
      fallback, and the trial loop writes one card per finished seed.
-  8. The window arm carries the last k cards, adds the best success when it is
+  7. The window arm carries the last k cards, adds the best success when it is
      older than the window, and states a repeated ending once.
 """
 
@@ -25,11 +24,11 @@ from pathlib import Path
 import pytest
 
 from capx.envs.trace_chain import (
+    TRACE_MODES,
     TraceRecord,
     build_reflection_prompt,
     filter_check_detail,
     format_card_trace,
-    format_dual_trace,
     format_trace,
     format_window_cards,
     load_best_trace,
@@ -40,6 +39,10 @@ from capx.envs.trace_chain import (
     write_injected_block,
     write_trace,
 )
+
+
+def test_only_the_four_supported_modes_remain() -> None:
+    assert TRACE_MODES == ("off", "last", "card", "window_card")
 
 
 def _record(seed: int, **overrides) -> TraceRecord:
@@ -625,32 +628,6 @@ def test_load_best_trace_ignores_an_incomplete_success(tmp_path: Path) -> None:
     assert load_best_trace(tmp_path, 2) is None
 
 
-def test_dual_trace_carries_the_last_attempt_and_the_best_success() -> None:
-    last = _record(4, code="close_gripper(target=20.5)", task_completed=False)
-    best = _record(3, code="close_gripper(target=28.5)", task_completed=True, reward=1.0)
-
-    block = format_dual_trace(last, best)
-    assert "PREVIOUS ATTEMPT - seed 4 (FAILED)" in block
-    assert "BEST SUCCESS SO FAR - seed 3 (SUCCEEDED)" in block
-    assert "close_gripper(target=20.5)" in block
-    assert "close_gripper(target=28.5)" in block
-    # The closing instruction belongs to the block, not to each record.
-    assert block.count("different scene instance") == 1
-
-
-def test_dual_trace_stays_under_the_cap() -> None:
-    last = _record(4, code="x = 1\n" * 5000, stdout="o" * 20000)
-    best = _record(3, code="y = 2\n" * 5000, stdout="p" * 20000,
-                   task_completed=True, reward=1.0)
-    block = format_dual_trace(last, best, max_chars=5000)
-    assert len(block) <= 5000
-
-
-def test_dual_trace_falls_back_without_a_success() -> None:
-    last = _record(4)
-    assert format_dual_trace(last, None) == format_trace(last)
-
-
 def test_card_trace_renders_the_card_and_the_check_detail() -> None:
     record = _record(
         6,
@@ -694,89 +671,6 @@ def test_reflection_prompt_uses_the_filtered_record() -> None:
     assert "wrong_key" in text
     for prefix in ("DID:", "MEASURED:", "WHY IT FAILED:", "NEXT TIME:"):
         assert prefix in text
-
-
-def test_dual_mode_injects_both_slots(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The trial loop wires both slots through to the prompt and the record."""
-    import copy
-    from types import SimpleNamespace
-
-    import capx.envs.trial as trial_mod
-    from capx.envs.launch import LaunchArgs
-
-    class _SeedEnv:
-        def __init__(self) -> None:
-            self.cfg = SimpleNamespace(append_final_check="check_success")
-            self.low_level_env = SimpleNamespace()
-            self.seed = None
-
-        def reset(self, *, seed=None, options=None):
-            self.seed = seed
-            return {
-                "full_prompt": [
-                    {"role": "system", "content": "sys"},
-                    {"role": "user", "content": [{"type": "text", "text": "TASK"}]},
-                ]
-            }, {}
-
-        def final_check_name(self):
-            return "check_success"
-
-        def step(self, code):
-            ok = self.seed == 2
-            return (
-                {"full_prompt": [{"role": "user", "content": [{"type": "text", "text": "x"}]}]},
-                1.0 if ok else 0.0,
-                False,
-                False,
-                {
-                    "sandbox_rc": 0,
-                    "stdout": f"ran seed {self.seed}",
-                    "stderr": "",
-                    "task_completed": ok,
-                    "failure_detail": None,
-                },
-            )
-
-    seen: list[str] = []
-
-    def _fake_query(_args, prompt, *_a, **_k):
-        seen.append(json.dumps(copy.deepcopy(prompt)))
-        return {"content": "```python\nprint('hello')\n```", "reasoning": ""}
-
-    monkeypatch.setattr(trial_mod, "_query_model", _fake_query)
-
-    args = LaunchArgs(config_path="fake.yaml", model="fake-model", debug=False)
-    config = {
-        "output_dir": str(tmp_path),
-        "record_video": False,
-        "use_visual_feedback": False,
-        "use_img_differencing": False,
-        "use_video_differencing": False,
-        "use_wrist_camera": False,
-        "use_oracle_code": False,
-        "trace_mode": "dual",
-        "trace_max_chars": 12000,
-        "deliver_tactile_skills": False,
-        "exec_alarm_seconds": None,
-        "use_parallel_ensemble": False,
-        "use_multimodel": False,
-    }
-    env = _SeedEnv()
-    for seed in (1, 2, 3, 4):
-        trial_mod._run_single_trial(env, seed, args, config, None)
-
-    seed4_prompt = seen[3]
-    assert "PREVIOUS ATTEMPT - seed 3" in seed4_prompt
-    assert "BEST SUCCESS SO FAR - seed 2" in seed4_prompt
-    assert "ran seed 3" in seed4_prompt
-    assert "ran seed 2" in seed4_prompt
-
-    record = json.loads((tmp_path / "trace_chain" / "seed_004.json").read_text())
-    assert record["injected_from_seed"] == 3
-    assert record["injected_best_seed"] == 2
 
 
 def test_card_mode_writes_and_injects_the_card(

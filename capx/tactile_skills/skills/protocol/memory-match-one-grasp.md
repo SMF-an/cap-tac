@@ -2,12 +2,12 @@
 id: R11
 name: memory-match-one-grasp
 family: protocol
-summary: One progressive squeeze per can — 0.50 touches nothing (both pads 34.0 mm), 0.25 is the contact close and must leave the far plane; hardness and texture are the difference between those two closes, never a third; then lift 2 cm and a ±2 mm sag pair.
+summary: One progressive squeeze per can — 0.50 is the loose read (a pad can already touch at this opening; that pad's baseline is loaded, not the grasp — read the open 34.0 mm as that pad's baseline or skip it and continue), 0.25 is the contact close and must leave the far plane; hardness and texture are the difference between those two closes, never a third; then lift 2 cm and a ±2 mm sag pair.
 task_types: []
 tasks: [tactile_memory_match]
 channels: [depth, anisotropy, coincidence]
 objects: the 4 cm orange cans, rigid and compliant
-evidence: 0.50 does not touch the can (both pads read 34.0 mm) and 0.25 lands at 21.3 mm on a rigid can against 26.6 mm on a compliant one — 12.7 mm against 7.4 mm of depth gain, no overlap and nothing near the 10 mm split. The same two closes carry the texture read at no extra close, and the lift carries the load response. 2026-11-07 gpt-6-astra trials 21 and 22 both required contact on the 0.50 close, so every probe was thrown away right after the 0.25 close with the reading already in hand, and neither trial ever placed a can.
+evidence: 0.50 does not touch the can (both pads read 34.0 mm) and 0.25 lands at 21.3 mm on a rigid can against 26.6 mm on a compliant one — 12.7 mm against 7.4 mm of depth gain, no overlap and nothing near the 10 mm split. The same two closes carry the texture read at no extra close, and the lift carries the load response. 2026-11-07 gpt-6-astra trials 21 and 22 both required contact on the 0.50 close, so every probe was thrown away right after the 0.25 close with the reading already in hand, and neither trial ever placed a can. 2026-11-11 learned run — on 16 of 19 seeds the right candidate's 0.50 close was loaded on the right pad (20-27 mm against 34.0 on the left) while the 0.25 close still contacted both pads, so the loaded loose read is not a failed grasp.
 ---
 
 ## How
@@ -17,7 +17,7 @@ the whole sequence — do NOT prepend the standalone force_threshold weight
 recipe:
 
 ```python
-close_gripper(position=0.50, adaptive=False)   # 1. loose: both depths 34.0 mm
+close_gripper(position=0.50, adaptive=False)   # 1. loose: usually 34.0 mm; a loaded pad is not an abort
 close_gripper(position=0.25, adaptive=False)   # 2. firm: real contact, < 33.0 mm
 z0 = get_object_pose(can)[0][2]; move_delta(dz=0.020)   # 3. lift 2 cm
 z1 = get_object_pose(can)[0][2]                          # how far the CAN followed
@@ -31,12 +31,14 @@ One squeeze supplies every feature: loose minus firm depth for hardness
 
 ## Traps
 
-- **Validity comes from a loose read that IS the far plane — 34.0 mm on both
-  pads, no contact — followed by a firm read in contact.** A pad in contact at
-  the 0.50 close means the can is not between the fingers; it is not a stricter
-  reading to accept. Low follow-through does not invalidate the reading,
-  symmetry is not required, and not every property channel has to vote
-  ([[follow-is-signal]]).
+- **Validity comes from a loose read that is not loaded, followed by a firm
+  read in contact.** 34.0 mm on both pads is the clean case, but at 0.50 the
+  opening is close to the can's width, so one pad can already be pressed; that
+  is that pad's baseline being loaded, not the grasp. Do not abort: use the
+  open-gripper far-plane reading as that pad's baseline, or skip that pad's
+  channel, and continue. The 0.25 close is the grasp's validity gate. Low
+  follow-through does not invalidate the reading, symmetry is not required,
+  and not every property channel has to vote ([[follow-is-signal]]).
 - **Do not add a third close.** Both features come off the 0.50 and 0.25 pair;
   closing further afterwards collapses the hardness contrast instead of
   sharpening it. On 2026-11-07 the three cans read 12.3 / 12.3 / 7.5 mm of
